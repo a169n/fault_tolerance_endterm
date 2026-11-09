@@ -1,33 +1,47 @@
-# Fault-Tolerant University Information System
+# Resilient University Information System
 
 A small distributed university platform (students, payments, transcripts,
-timetables), built **twice**: a **baseline** and a **fault-tolerant** version. Both
-versions get the same faults injected, and the measured difference shows what the
-fault-tolerance mechanisms buy.
+timetables), built as the **midterm** project of the course and extended for the
+**endterm**. One code base and one image deploy in **three modes**, the same faults and
+attacks are injected into each, and the measured difference shows what each layer of
+mechanisms buys:
 
-Both versions are **one and the same code and image**. The only difference is the
-switch `FT_ENABLED=0|1` (plus `RESTART_POLICY`), so every measured difference is
-caused by the mechanisms and nothing else.
+| Mode | Switches | What it is |
+|---|---|---|
+| **baseline** | `FT_ENABLED=0`, `ENDTERM_ENABLED=0` | replicas and standby exist, but no software uses them |
+| **midterm** | `FT_ENABLED=1`, `ENDTERM_ENABLED=0` | the midterm fault-tolerant system (git tag `midterm-final`) |
+| **endterm** | `FT_ENABLED=1`, `ENDTERM_ENABLED=1` | + redundant gateways, outlier ejection, authN/authZ, validation, rate limiting, audit, required payment `Idempotency-Key`, chaos token |
 
-Stack: Python + FastAPI, PostgreSQL 16 with streaming replication, Docker Compose,
-Prometheus. The experiment harness is TypeScript on Node 22.
+Observability (correlation IDs, metrics, structured logs, Prometheus, Grafana, alert
+rules, Docker healthchecks) and credential hygiene (generated DB passwords,
+least-privilege roles) are on in **every** mode, so all three are measured the same
+way. Every measured difference is caused by the mechanisms and nothing else.
+
+Stack: Python 3.12 + FastAPI, PostgreSQL 16 with streaming replication, nginx,
+Docker Compose, Prometheus, Grafana, postgres-exporter. The experiment harness is
+TypeScript on Node 22.
+
+Reports: the endterm report is [`reports/endterm/REPORT.md`](reports/endterm/REPORT.md);
+the midterm report is [`reports/REPORT.md`](reports/REPORT.md); the architecture
+diagrams are in [`reports/ARCHITECTURE.md`](reports/ARCHITECTURE.md).
 
 ## Project map
 
 ```text
-docker-compose.yml        the deployment: 2 replicas per service, DB primary + standby,
-                          and every infrastructure mechanism (H1–H5), labelled
+docker-compose.yml        the deployment: nginx, 2 gateways, 2 replicas per service, auth,
+                          DB primary + standby, monitoring plane, healthchecks, secrets from .env
 
 app/                      everything that runs inside the containers
 ├── services/             WHAT the system does: the business logic
-│   ├── gateway.py          single entry point; wires the mechanisms together
+│   ├── gateway.py          entry point behind nginx; policy enforcement point (endterm)
+│   ├── auth.py             issues short-lived JWTs (endterm)
 │   ├── student.py          2 replicas
 │   ├── payment.py          2 replicas, the money path
 │   ├── transcript.py       1 instance, serves stale data when the DB is down
 │   ├── timetable.py        2 replicas, long-running jobs
 │   └── schedule.py         pure timetable placement algorithm
 ├── fault_tolerance/      HOW it survives failures (README.md = full list)
-│   ├── software/           S1–S10, one file per mechanism
+│   ├── software/           S1–S11, one file per mechanism
 │   │   ├── retry.py              S1 retry + exponential backoff
 │   │   ├── timeouts.py           S2 timeouts (+ S8 fail-fast writes)
 │   │   ├── circuit_breaker.py    S3
@@ -35,68 +49,137 @@ app/                      everything that runs inside the containers
 │   │   ├── idempotency.py        S5 no double charges
 │   │   ├── checkpoint_rollback.py S6 payments
 │   │   ├── degradation.py        S7 stale cache
-│   │   └── job_checkpoint.py     S10 timetable jobs
+│   │   ├── job_checkpoint.py     S10 timetable jobs
+│   │   └── outlier_ejection.py   S11 per-instance ejection (endterm)
 │   └── infrastructure/     code side of H1 and H2
 │       ├── load_balancer.py      H1 round robin over replicas
 │       └── db_failover.py        H2 read from the standby
-├── core/                 plumbing: db.py, eventlog.py (+ /metrics), service.py
-└── fault_injection.py    /chaos endpoints the experiments use to break things
+├── security/             endterm controls: tokens, passwords, policy, audit, validation, rate_limit
+├── core/                 plumbing: db.py, eventlog.py, context.py (request id), metrics.py, service.py
+└── fault_injection.py    /chaos endpoints the experiments use to break things (token in endterm)
 
-config/                   PostgreSQL schema + seed data + roles, pg_hba.conf,
-                          prometheus/ (scrape config, alert rules + tests), grafana/ (dashboard)
+config/
+├── nginx/                single.conf (baseline, midterm), redundant.conf (endterm)
+├── postgres/             schema, seed data, roles (00-roles.sh), auth users, grants, pg_hba.conf
+├── prometheus/           prometheus.yml, alerts.yml, alerts.test.yml (promtool unit tests)
+└── grafana/              provisioning + dashboard university.json
 
-experiments/              HOW the experiments are run
-├── scenarios.ts            the 6 failure scenarios: inject + repair
-├── workload.ts             load generator, records every request
-├── run.ts                  one experiment end to end
-├── campaign.ts             all 6 scenarios in a row
-├── metrics.ts              MTTF, MTBF, MTTR, availability, data consistency
-├── demo.ts                 live demonstration of 4 failure-and-recovery scenarios
-├── env.ts                  mode → .env builder (pure, tested by env.test.ts)
+experiments/              HOW the experiments are run (TypeScript, *.test.ts = node --test)
+├── scenarios.ts            the 10 scenarios E1–E10: inject, repair, expected alerts, acceptance
+├── workload.ts             load generator, records every request (auth-aware in endterm)
+├── attacks.ts              the E9/E10 attack and abuse sets
+├── run.ts                  one experiment end to end (known-state restore first)
+├── campaign.ts             every scenario × N repetitions
+├── metrics.ts              availability, latency, detection/recovery, key-level integrity
+├── alerts.ts, resources.ts, acceptance.ts   alert capture, CPU/memory, pass/fail criteria
+├── aggregate.ts            runs → reports/endterm/RESULTS.md + results.csv
+├── snapshot.ts             Grafana PNG for one run's time window
+├── demo.ts                 live demonstration (reports/endterm/DEMO.md)
+├── env.ts, env-file.ts     mode → .env builder (pure, tested)
 └── up.ts                   deploy a mode (npm run up:baseline | up:midterm | up:endterm)
 
-logs/                     raw data: logs/<scenario>__<mode>/{workload,events}.jsonl.gz
-reports/                  everything written up
-├── REPORT.md               ◀ the technical report (start here)
-├── ARCHITECTURE.md         diagrams: deployment and code layers
-├── COMPARISON.md           baseline vs fault-tolerant
-├── METHODOLOGY.md          how the experiments were run and measured
-├── EXPERIMENT-LOG.md       every run, one row each
-└── runs/<scenario>__<mode>/REPORT.md, metrics.json   one report per run (run.ts writes metrics.json)
+tests/                    unit/ (pytest, no containers), integration/ (against a live endterm stack)
+.github/workflows/ci.yml  unit, harness, config checks, pip-audit, integration
 
+logs/                     raw data. Midterm: logs/<scenario>__<mode>/. Endterm: logs/endterm/<scenario>__<mode>__r<N>/
+reports/                  everything written up
+├── REPORT.md               the midterm technical report
+├── ARCHITECTURE.md         diagrams: endterm and midterm deployment, code layers, trust boundaries
+├── COMPARISON.md, METHODOLOGY.md, EXPERIMENT-LOG.md, runs/   midterm results
+└── endterm/
+    ├── REPORT.md             ◀ the endterm technical report (start here)
+    ├── THREAT-MODEL.md       STRIDE per trust boundary, controls, residual risks
+    ├── ALERTS.md             the 6 alert rules: what, threshold, response
+    ├── TEST-PLAN.md          test levels, E1–E10 with hypotheses and acceptance criteria
+    ├── DEMO.md               demonstration script
+    ├── deps/                 pip-audit output
+    └── runs/<scenario>__<mode>__r<N>/metrics.json   one file per run
 ```
 
 ## Running
 
 Same commands on Windows, macOS and Linux. Needs Docker and Node.js 22.6 or newer
-(`node --version`; with nvm: `nvm use 22`). No other dependencies.
+(`node --version`; with nvm: `nvm use 22`). The Python tests need Python 3.12+ and
+`pip install -r requirements-dev.txt`.
 
-`npm run up:<mode>` writes `.env` (see `.env.example`): the mode switches are
-overwritten each time, secrets already in `.env` are kept, and missing ones are
-generated randomly. `.env` is git-ignored. The midterm as submitted is tagged
-`midterm-final`.
+### Deploy one of the three modes
 
-    npm run up:baseline     # deploy the baseline           (FT_ENABLED=0, ENDTERM_ENABLED=0)
-    npm run up:midterm      # deploy the midterm FT system  (FT_ENABLED=1, ENDTERM_ENABLED=0)
-    npm run up:endterm      # deploy the endterm system     (FT_ENABLED=1, ENDTERM_ENABLED=1)
+    npm run up:baseline     # FT_ENABLED=0, ENDTERM_ENABLED=0, RESTART_POLICY=no,             NGINX_PROFILE=single
+    npm run up:midterm      # FT_ENABLED=1, ENDTERM_ENABLED=0, RESTART_POLICY=unless-stopped, NGINX_PROFILE=single
+    npm run up:endterm      # FT_ENABLED=1, ENDTERM_ENABLED=1, RESTART_POLICY=unless-stopped, NGINX_PROFILE=redundant
     npm run up:ft           # alias of up:midterm, kept so the midterm docs stay valid
     npm run mode            # which mode is running now: baseline | midterm | endterm
-    npm run test:harness    # unit tests of the TypeScript harness (node --test)
 
-    npm run demo            # live demo: app crash, DB failure, node failure, timetable
-    npm run demo -- db-failure   # just one scenario
-    npm run exp app-crash -- --rep 1        # one controlled experiment (known-state restore first)
-    npm run campaign -- --reps 3            # every scenario x 3 against the deployed version
+Switching mode for a fair comparison: start each mode from a fresh volume,
+`docker compose down -v` first. After pulling schema changes, do the same once.
+
+### Secrets and `.env`
+
+`npm run up:<mode>` writes `.env` (template: `.env.example`) and then runs
+`docker compose up -d --build`. The mode switches are overwritten each time. The secrets
+`POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `REPL_PASSWORD`, `MONITOR_DB_PASSWORD`, `JWT_SECRET`,
+`CHAOS_TOKEN`, `DEMO_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` are kept if already present and
+generated randomly (24 random bytes, base64url) if missing. `.env` is git-ignored; never commit
+it. `docker-compose.yml` refuses to start without it (`${VAR:?}`), and
+`npm run env -- <mode>` writes it without starting anything. To use a secret in a shell:
+
+    set -a; . ./.env; set +a      # then $DEMO_PASSWORD, $CHAOS_TOKEN, ... are set
+
+### Monitoring (always on, every mode)
+
+| What | URL | Notes |
+|---|---|---|
+| API (nginx) | http://localhost:8080 | Swagger UI at `/docs`; every service also on its `127.0.0.1:30xx/docs` |
+| Prometheus | http://localhost:9090 | alert state at `/alerts`, rules at `/rules`, targets at `/targets` |
+| Grafana | http://localhost:3000/d/university | anonymous read-only; admin user `admin`, password `GRAFANA_ADMIN_PASSWORD` from `.env` |
+| postgres-exporter | http://localhost:9187/metrics | `pg_up`, replication statistics |
+
+    npm run monitoring      # (re)start only Prometheus, Grafana and postgres-exporter
+
+### Tests
+
+    npm test                    # unit tests (pytest) + harness tests (node --test)
+    python3 -m pytest -q tests/unit
+    npm run test:harness        # experiments/**/*.test.ts
+    npm run test:alerts         # promtool unit tests for the alert rules (needs Docker)
+    npm run up:endterm && npm run test:integration   # integration suite; skips unless the stack runs endterm
+
+CI (`.github/workflows/ci.yml`) runs the unit and harness tests, `docker compose config` for
+all three modes, the promtool and `nginx -t` checks, `pip-audit -r requirements.txt`, and the
+integration suite against a fresh endterm stack.
+
+### Experiments, campaign, aggregation, figures
+
+    npm run exp app-crash -- --rep 1        # one experiment (restore → workload → inject → repair → capture)
+    npm run campaign -- --reps 3            # all 10 scenarios × 3 repetitions against the deployed mode
     npm run campaign -- --reps 1 --only app-crash,db-failure
-    # results: reports/endterm/runs/<scenario>__<mode>__r<N>/metrics.json (alerts, resources,
-    # key-level integrity, acceptance); raw data: logs/endterm/<scenario>__<mode>__r<N>/
 
-    # Monitoring is always on: Prometheus http://localhost:9090 (alerts: /alerts),
-    # Grafana http://localhost:3000/d/university (anonymous read-only; admin password in .env)
-    npm run test:alerts     # promtool unit tests for the alert rules
-    # Swagger UI:           http://localhost:8080/docs  (every service: :30xx/docs)
+Each run writes `reports/endterm/runs/<scenario>__<mode>__r<N>/metrics.json` (alerts,
+resources, key-level integrity, acceptance) and the raw data to
+`logs/endterm/<scenario>__<mode>__r<N>/`. `--rep 0` is a smoke run and is left out of the
+aggregation. The full campaign, one fresh volume per mode:
 
-After pulling schema changes, recreate the database once: `docker compose down -v`.
+    npm run up:baseline && npm run campaign -- --reps 3
+    docker compose down -v && npm run up:midterm && npm run campaign -- --reps 3
+    docker compose down -v && npm run up:endterm && npm run campaign -- --reps 3
+
+Then aggregate every stored run and, while the stack still holds the time window in
+Prometheus, take dashboard snapshots:
+
+    node --experimental-strip-types experiments/aggregate.ts
+        # → reports/endterm/RESULTS.md and reports/endterm/results.csv
+    node --experimental-strip-types experiments/snapshot.ts db-failure__endterm__r1 [more tags ...]
+        # → reports/endterm/figures/<tag>.png (needs Playwright installed globally)
+
+Do not run the demo or anything else against the stack while a campaign runs.
+
+### Demonstration
+
+    npm run demo                    # app-crash, db-failure, gateway-failure, unauthorized, abuse
+    npm run demo -- full            # all nine demos
+    npm run demo -- unauthorized    # one demo
+
+The script and what to expect are in [`reports/endterm/DEMO.md`](reports/endterm/DEMO.md).
 
 ## Services and ports
 
@@ -165,12 +248,15 @@ application crash must therefore come from inside the process (`/chaos/crash`).
 
 ## Measurement
 
-Every service appends one JSON line per event to `logs/events.jsonl`:
+Every service appends one JSON line per event to `logs/events.jsonl`. Every line carries the
+request's correlation id (`rid`), the service, the mode and a level (values below are placeholders):
 
-    {"ts":…,"svc":"gateway","ft":1,"kind":"health","target":"http://student-1:3000","ok":false}
-    {"ts":…,"svc":"gateway","ft":1,"kind":"route","instance":"http://student-2:3000","attempts":2}
-    {"ts":…,"svc":"payment-1","ft":1,"kind":"recovery","action":"duplicate_suppressed"}
+    {"ts":…,"svc":"gateway-1","ft":1,"mode":"endterm","rid":"…","level":"info","kind":"route","target":"payments","instance":"http://payment-2:3000","ok":true,"attempts":1}
+    {"ts":…,"svc":"gateway-1","ft":1,"mode":"endterm","rid":"…","level":"warning","kind":"audit","action":"POST /api/payments","outcome":"deny","reason":"not_owner","sub":"s7","role":"student"}
+    {"ts":…,"svc":"payment-1","ft":1,"mode":"endterm","rid":"…","level":"info","kind":"recovery","action":"duplicate_suppressed"}
+
+    grep '"rid": "<id>"' logs/events.jsonl     # one request's path through nginx, gateway and services
 
 Every metric in `reports/` is computed from this log plus the per-request workload
-log; no number is asserted without raw data behind it. The same events are counted
-live on `GET /metrics` of every service for Prometheus.
+log; no number is asserted without raw data behind it. Live metrics are on `GET /metrics`
+of every gateway and service (scraped by Prometheus every 2 s).
