@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Body, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
+from ..core import metrics
 from ..core.context import HEADER as REQUEST_ID_HEADER
 from ..core.context import REQUEST_ID, new_request_id
 from ..core.errors import UpstreamError
@@ -21,7 +23,7 @@ from ..fault_tolerance.infrastructure import load_balancer
 from ..fault_tolerance.software import circuit_breaker, health_check, idempotency, outlier_ejection
 from ..fault_tolerance.software.degradation import StaleCache
 from ..fault_tolerance.software.retry import call
-from ..security import audit, policy, tokens, validation
+from ..security import audit, policy, rate_limit, tokens, validation
 from ..security.tokens import Principal
 
 
@@ -40,6 +42,7 @@ POOLS: Dict[str, List[str]] = {  # replicas, from docker-compose.yml
 _client = httpx.AsyncClient(timeout=None)
 _last_good = StaleCache()
 audit.precreate()  # every deny reason exported as 0 from start-up, in every mode (ALERTS.md)
+rate_limit.precreate()  # and every rate-limit scope
 
 
 @asynccontextmanager
@@ -134,6 +137,11 @@ async def login(request: Request):
     # The raw body is relayed whatever its content type (`curl -d` sends a form type); the auth
     # service parses it. Same retry/breaker path as the API pools. Tokens are verified here at the
     # gateway (Task 9), so an auth-1 outage blocks only new logins, not existing sessions.
+    if endterm_enabled():  # brute-force protection: per client IP, 1/s burst 5 (Task 11)
+        client = _client_ip(request)
+        retry_after = rate_limit.check(rate_limit.LOGIN, client)
+        if retry_after is not None:
+            return _throttled(rate_limit.LOGIN, "POST /auth/token", None, retry_after, client=client)
     return await proxy("auth", request, "token", public=True)
 
 
@@ -174,6 +182,26 @@ def _bounded(value: object) -> Optional[str]:
     return value if isinstance(value, str) and len(value) <= 128 else None
 
 
+def _client_ip(request: Request) -> str:
+    """The login limiter's key: the first X-Forwarded-For value (nginx overwrites the header with
+    its peer address, THREAT-MODEL.md B1.S4), normalised. A missing or unparsable value falls back
+    to the TCP peer, so junk in the header can never mint a fresh bucket per request."""
+    first = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+    try:
+        return str(ipaddress.ip_address(first[:64]))
+    except ValueError:
+        return request.client.host if request.client else "unknown"
+
+
+def _throttled(scope: str, action: str, principal: Optional[Principal], retry_after: float,
+               **fields) -> JSONResponse:
+    """429 with Retry-After; counted in rate_limited_total{scope} and audited as a deny."""
+    metrics.RATE_LIMITED.labels(scope=scope).inc()
+    audit.record(action, "deny", principal, rate_limit.REASON, status=429, scope=scope, **fields)
+    return JSONResponse(status_code=429, content={"error": "too many requests"},
+                        headers={"retry-after": rate_limit.retry_after_header(retry_after)})
+
+
 def _deny(action: str, principal: Optional[Principal], status: int, reason: str) -> JSONResponse:
     audit.record(action, "deny", principal, reason, status=status)
     if status == 401:
@@ -186,7 +214,9 @@ def _deny(action: str, principal: Optional[Principal], status: int, reason: str)
 
 
 async def _enforce(pool: str, request: Request, path: str) -> Optional[JSONResponse]:
-    """The policy enforcement point (endterm only): None to proceed, or the 401/403 to return.
+    """The policy enforcement point (endterm only): None to proceed, or the 401/403/429 to return.
+
+    Order: authenticate, then the per-principal rate limit (Task 11), then authorize.
 
     Fails closed: an exception while verifying the token is a 401, one while deciding a 403.
     The Authorization header is never forwarded upstream and never logged (``proxy`` sends
@@ -200,6 +230,12 @@ async def _enforce(pool: str, request: Request, path: str) -> Optional[JSONRespo
         return _deny(action, None, 401, exc.reason)
     except Exception:
         return _deny(action, None, 401, "malformed")
+
+    if principal is not None:  # per principal, before authorization: probing a token is throttled too
+        scope = rate_limit.principal_scope(principal.role)
+        retry_after = rate_limit.check(scope, f"{principal.role}:{principal.sub}")
+        if retry_after is not None:
+            return _throttled(scope, action, principal, retry_after)
 
     body = await _json_body(request) if method == "POST" else None
     try:

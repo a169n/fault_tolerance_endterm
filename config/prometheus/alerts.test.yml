@@ -171,7 +171,7 @@ tests:
           - exp_labels:
               severity: warning
             exp_annotations:
-              summary: "More than 2 requests per second denied by authentication or authorization (30s window)"
+              summary: "More than 2 requests per second denied by authentication, authorization or rate limiting (30s window)"
               threshold: "sum(rate(auth_denied_total[30s])) > 2, for 4s"
               response: "Possible intrusion attempt: review the audit log by rid and sub; block the source or revoke the credentials."
 

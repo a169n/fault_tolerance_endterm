@@ -80,6 +80,7 @@ def test_client_caused_login_failures_do_not_open_the_auth_breaker(
 
     request.getfixturevalue(mode)
     monkeypatch.setenv("JWT_SECRET", "unit-test-secret-0123456789abcdefghij")
+    monkeypatch.setenv("RATE_LIMIT_LOGIN_BURST", "1000")  # this test is about the breaker, not brute force
     monkeypatch.setattr(circuit_breaker, "_breakers", {})
     monkeypatch.setattr(outlier_ejection, "_detectors", {})
     monkeypatch.setitem(gateway.POOLS, "auth", ["http://auth-1:3000"])

@@ -121,6 +121,12 @@ The auth service issues 15-minute JWTs (HS256) through the gateway. The demo use
 Only endterm requires the token on `/api/*` (Task 9). The gateway verifies it with
 `JWT_SECRET`, so an `auth-1` outage blocks new logins but not existing sessions.
 
+Endterm also rate-limits at the gateway (Task 11, `app/security/rate_limit.py`): logins per
+client IP (1/s, burst 5) and `/api/*` per user (student 10/s burst 20, staff 5 000/s, admin
+1 000/s). Over quota the answer is `429` with `Retry-After`. The limits are kept **per gateway**,
+so with two gateways the cluster-wide limit is up to 2× the quota. Override a quota with
+`RATE_LIMIT_<SCOPE>_PER_S` / `RATE_LIMIT_<SCOPE>_BURST` (scope `LOGIN`, `STUDENT`, `STAFF`, `ADMIN`).
+
 ## Breaking it by hand
 
     curl -X POST localhost:3011/chaos/crash                              # application crash

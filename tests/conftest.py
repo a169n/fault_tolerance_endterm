@@ -31,3 +31,13 @@ def endterm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Endterm mode: FT and the endterm behaviour are both on."""
     monkeypatch.setenv("FT_ENABLED", "1")
     monkeypatch.setenv("ENDTERM_ENABLED", "1")
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    """Every test starts with empty rate-limit buckets (they are per-process state in the gateway)."""
+    from app.security import rate_limit
+
+    rate_limit.reset()
+    yield
+    rate_limit.reset()

@@ -6,9 +6,10 @@ the action (a route template, never a raw path), the outcome and the reason. It 
 every deny, every payment allow and every admin action at the gateway, and for every login,
 success or failure, at the auth service.
 
-Every deny also increments ``auth_denied_total{reason}`` (AuthFailureSpike). The label is the
-reason only when it is one of the fixed reasons below; anything else is counted as ``other``, so
-a caller can never create new series.
+Every deny also increments ``auth_denied_total{reason}`` (AuthFailureSpike), including the
+gateway's rate-limit refusals (``reason="rate_limited"``): a flood of 429s is abuse the alert must
+see (E10). The label is the reason only when it is one of the fixed reasons below; anything else
+is counted as ``other``, so a caller can never create new series.
 
 Secrets never reach the line, whatever the caller passes:
   - a field whose name looks like a credential (password, token, secret, authorization, cookie,
@@ -22,14 +23,15 @@ from typing import Any, Literal, Optional
 
 from ..core import metrics
 from ..core.eventlog import log
-from . import policy, tokens
+from . import policy, rate_limit, tokens
 from .tokens import Principal
 
 Outcome = Literal["allow", "deny"]
 
 LOGIN_REASONS = ("invalid_credentials",)  # counted by the auth service
-REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS + LOGIN_REASONS + ("other",)))
-GATEWAY_REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS))  # exported as 0 from start-up
+THROTTLE_REASONS = (rate_limit.REASON,)  # a 429 from the gateway's rate limiter (Task 11)
+REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS + THROTTLE_REASONS + LOGIN_REASONS + ("other",)))
+GATEWAY_REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS + THROTTLE_REASONS))  # 0 from start-up
 
 REDACTED = "[redacted]"
 _SECRET_KEY = re.compile(r"pass(word|wd)?|pwd|token|secret|authori[sz]ation|cookie|api[-_]?key|credential",
