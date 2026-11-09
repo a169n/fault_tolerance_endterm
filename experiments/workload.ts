@@ -9,6 +9,8 @@ export type Rec = {
   err?: string;
   intent?: string;   // logical payment intent (idempotency key)
   retry?: boolean;   // a client-side resend of the same intent
+  rid: string;       // x-request-id sent with the request: <runId>-<n>, greppable in logs/events.jsonl
+  rateLimited: boolean;  // 429 from the endterm rate limiter
 };
 
 export type WorkloadOpts = {
@@ -19,7 +21,21 @@ export type WorkloadOpts = {
   rampConcurrency?: number;
   clientTimeoutMs?: number;
   runId: string;
+  token?: string;         // endterm: bearer token sent as Authorization on every request
 };
+
+// Endterm: one login per run (POST /auth/token through nginx). Throws on anything but a token.
+export async function login(gateway: string, username: string, password: string): Promise<string> {
+  const res = await fetch(`${gateway}/auth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+    signal: AbortSignal.timeout(5_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as { access_token?: string };
+  if (!res.ok || !body.access_token) throw new Error(`login as ${username} failed: HTTP ${res.status}`);
+  return body.access_token;
+}
 
 const OPS = [
   { name: 'students', weight: 0.6 },
@@ -39,6 +55,8 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
   const deadline = Date.now() + durationMs;
   const recs: Rec[] = [];
   let intentCounter = 0;
+  let requestCounter = 0;
+  const auth: Record<string, string> = opts.token ? { authorization: `Bearer ${opts.token}` } : {};
 
   const windowOver = new AbortController();
   const stopTimer = setTimeout(() => windowOver.abort(), durationMs);
@@ -48,7 +66,8 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
     const student = `s${1 + Math.floor(Math.random() * 200)}`;
     let url = `${gateway}/api/students/${student}`;
     const signal = AbortSignal.any([AbortSignal.timeout(clientTimeoutMs), windowOver.signal]);
-    let init: RequestInit = { signal };
+    const rid = `${runId}-${requestCounter++}`;
+    let init: RequestInit = { signal, headers: { 'x-request-id': rid, ...auth } };
 
     if (op === 'transcripts') url = `${gateway}/api/transcripts/${student}`;
     if (op === 'payments') {
@@ -56,7 +75,7 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
       init = {
         ...init,
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'idempotency-key': intent! },
+        headers: { 'content-type': 'application/json', 'idempotency-key': intent!, 'x-request-id': rid, ...auth },
         body: JSON.stringify({ studentId: student, amount: 100 }),
       };
     }
@@ -67,6 +86,7 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
       recs.push({
         ts: started, op, status: res.status, ok: res.status < 400,
         degraded: res.status === 203, ms: Date.now() - started, intent, retry,
+        rid, rateLimited: res.status === 429,
       });
     } catch (e) {
       const abandoned = windowOver.signal.aborted && Date.now() - started < clientTimeoutMs;
@@ -75,7 +95,7 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
         ms: Date.now() - started,
         err: abandoned ? 'abandoned_at_window_close'
           : (e as Error).name === 'TimeoutError' ? 'client_timeout' : (e as Error).message,
-        intent, retry,
+        intent, retry, rid, rateLimited: false,
       });
     }
   }

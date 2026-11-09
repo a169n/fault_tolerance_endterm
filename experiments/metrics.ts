@@ -1,9 +1,15 @@
 import type { Rec } from './workload.ts';
+import type { AlertObs } from './alerts.ts';
+import { summarizeResources, type ResSample } from './resources.ts';
 
 export type Event = Record<string, any>;
 
-const pct = (xs: number[], p: number): number =>
-  xs.length === 0 ? 0 : xs.slice().sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))];
+// Nearest-rank percentile: the smallest value with at least p % of the values at or below it.
+export const pct = (xs: number[], p: number): number => {
+  if (xs.length === 0) return 0;
+  const sorted = xs.slice().sort((a, b) => a - b);
+  return sorted[Math.min(xs.length - 1, Math.max(0, Math.ceil((p / 100) * xs.length) - 1))];
+};
 
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
@@ -51,8 +57,47 @@ export function outages(recs: Rec[], t0: number, t1: number): { outages: Outage[
   };
 }
 
-export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: number, injectTs: number) {
+// Successful responses per second (goodput) before the fault, between inject and repair, and after the repair.
+export function throughput(recs: Rec[], t0: number, injectTs: number, repairTs: number, t1: number) {
+  const rps = (from: number, to: number): number | null => {
+    if (to <= from) return null;
+    const n = recs.filter((r) => r.ok && r.ts >= from && r.ts < to).length;
+    return n / ((to - from) / 1000);
+  };
+  return {
+    preFaultRps: rps(t0, injectTs),
+    duringFaultRps: rps(injectTs, repairTs),
+    postRepairRps: rps(repairTs, t1),
+  };
+}
+
+export type AlertMetric = {
+  name: string;
+  fired: boolean;
+  detectionMs: number | null;             // firstFiringTs - injectTs
+  resolvedAfterRepairMs: number | null;   // resolvedTs - repairTs
+  firstPendingTs: number | null;
+  firstFiringTs: number | null;
+  resolvedTs: number | null;
+};
+
+export function alertMetrics(obs: AlertObs[], injectTs: number, repairTs: number | null): AlertMetric[] {
+  return obs.map((a) => ({
+    name: a.name,
+    fired: a.firstFiringTs != null,
+    detectionMs: a.firstFiringTs != null ? a.firstFiringTs - injectTs : null,
+    resolvedAfterRepairMs: a.resolvedTs != null && repairTs ? a.resolvedTs - repairTs : null,
+    firstPendingTs: a.firstPendingTs,
+    firstFiringTs: a.firstFiringTs,
+    resolvedTs: a.resolvedTs,
+  }));
+}
+
+export type MetricsExtra = { repairTs?: number; alerts?: AlertObs[]; resources?: ResSample[] };
+
+export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: number, injectTs: number, extra: MetricsExtra = {}) {
   const observationMs = t1 - t0;
+  const repairTs = extra.repairTs || t1;
   const { outages: outs, upBins, downBins, idleBins } = outages(recs, t0, t1);
 
   const ttfs: number[] = [];
@@ -92,7 +137,10 @@ export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: num
       failed: recs.length - ok.length,
       degraded: recs.filter((r) => r.degraded).length,
       clientTimeouts: recs.filter((r) => r.err === 'client_timeout').length,
+      rateLimited: recs.filter((r) => r.status === 429).length,
+      errorRate: recs.length === 0 ? null : (recs.length - ok.length) / recs.length,
     },
+    throughput: throughput(recs, t0, injectTs, repairTs, t1),
     availability: {
       timeBased: upBins + downBins === 0 ? null : upBins / (upBins + downBins),
       requestBased: recs.length === 0 ? null : ok.length / recs.length,
@@ -116,6 +164,7 @@ export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: num
       detectionSource: firstAttemptFail != null && firstAttemptFail === detectionCandidates.reduce((a, b) => (b < a ? b : a)) ? 'failed call attempt'
         : firstHealthAfter != null && firstHealthAfter === detectionCandidates.reduce((a, b) => (b < a ? b : a)) ? 'failed health probe'
         : firstFailAfter != null ? 'client-visible failure' : 'none',
+      avgMs: mean(latencies),
       p50Ms: pct(latencies, 50),
       p95Ms: pct(latencies, 95),
       p99Ms: pct(latencies, 99),
@@ -131,6 +180,8 @@ export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: num
       checkpointsRolledBack: count((e) => e.kind === 'recovery' && e.action === 'checkpoint_rolled_back'),
       healthTransitions: events.filter((e) => e.kind === 'health').map((e) => ({ ts: e.ts, target: e.target, ok: e.ok })),
     },
+    alerts: alertMetrics(extra.alerts ?? [], injectTs, extra.repairTs ?? null),
+    resources: summarizeResources(extra.resources ?? []),
   };
 }
 
@@ -141,25 +192,76 @@ export type Ledger = {
   charged: number; balances: number;
 };
 
-export function consistencyFrom(recs: Rec[], ledger: Ledger) {
+export type DbPaymentRow = { key: string; state: string };
+
+const ACKED = (r: Rec) => r.status === 200 || r.status === 201;
+
+// Payment integrity from the client's view (recs) and the DB's (ledger totals and, when available,
+// one row per payment: idempotency key and state).
+//   lostRecords    intents acknowledged with 200/201 but not `completed` in the DB
+//   phantomRecords `completed` in the DB with no 2xx acknowledgement (allowed: the ack was lost; reported)
+//   duplicateCharges  DB: completed rows per key beyond the first (the UNIQUE constraint makes this 0,
+//                  so the check proves it) + client: 201 answers per intent beyond the first
+// Baseline stores a fresh UUID per request and ignores Idempotency-Key, so no DB key matches a client
+// intent; the key-level checks then fall back to counts (integrityBasis: 'count').
+export function consistencyFrom(recs: Rec[], ledger: Ledger, dbRows?: DbPaymentRow[] | null) {
   const payments = recs.filter((r) => r.op === 'payments');
   const chargesPerIntent = new Map<string, number>();
   const intents = new Set<string>();
+  const acked = new Set<string>();
   for (const r of payments) {
     const intent = String(r.intent);
     intents.add(intent);
+    if (ACKED(r)) acked.add(intent);
     if (r.status === 201) chargesPerIntent.set(intent, (chargesPerIntent.get(intent) ?? 0) + 1);
   }
-  let duplicates = 0;
-  for (const n of chargesPerIntent.values()) duplicates += Math.max(0, n - 1);
+  let duplicatesClient = 0;
+  for (const n of chargesPerIntent.values()) duplicatesClient += Math.max(0, n - 1);
+
+  let integrityBasis: 'idempotency-key' | 'count' | null = null;
+  let lostIntents: string[] = [];
+  let lostRecords: number | null = null;
+  let phantomRecords: number | null = null;
+  let duplicatesDb: number | null = null;
+  if (dbRows) {
+    const completedPerKey = new Map<string, number>();
+    for (const row of dbRows) {
+      if (row.state === 'completed') completedPerKey.set(row.key, (completedPerKey.get(row.key) ?? 0) + 1);
+    }
+    duplicatesDb = 0;
+    for (const n of completedPerKey.values()) duplicatesDb += Math.max(0, n - 1);
+
+    const keyLevel = dbRows.length === 0 || dbRows.some((row) => intents.has(row.key));
+    if (keyLevel) {
+      integrityBasis = 'idempotency-key';
+      lostIntents = [...acked].filter((k) => !completedPerKey.has(k)).sort();
+      lostRecords = lostIntents.length;
+      phantomRecords = [...completedPerKey.keys()].filter((k) => !acked.has(k)).length;
+    } else {
+      integrityBasis = 'count';
+      const ackedResponses = payments.filter(ACKED).length;
+      const completedRows = dbRows.filter((row) => row.state === 'completed').length;
+      lostRecords = Math.max(0, ackedResponses - completedRows);
+      phantomRecords = Math.max(0, completedRows - ackedResponses);
+    }
+  }
 
   return {
     paymentRequestsSent: payments.length,
     paymentRequestsAccepted: payments.filter((r) => r.ok).length,
+    paymentRequestsRateLimited: payments.filter((r) => r.status === 429).length,
     distinctPaymentIntents: intents.size,
+    acknowledgedIntents: acked.size,
     deduplicatedResponses: payments.filter((r) => r.status === 200).length,
-    duplicateCharges: duplicates,
-    unacknowledgedIntents: intents.size - chargesPerIntent.size,
+    duplicateCharges: duplicatesClient + (duplicatesDb ?? 0),
+    duplicateChargesClient: duplicatesClient,
+    duplicateChargesDb: duplicatesDb,
+    unacknowledgedIntents: intents.size - acked.size,
+    integrityBasis,
+    lostRecords,
+    lostIntents: lostIntents.slice(0, 50),  // the first 50, for diagnosis; lostRecords is the full count
+    phantomRecords,
+    dbRows: dbRows ? dbRows.length : null,
     completedInDb: ledger.completed,
     dbVsIntents: ledger.completed - intents.size,
     orphanedPending: ledger.pending,
@@ -169,3 +271,5 @@ export function consistencyFrom(recs: Rec[], ledger: Ledger) {
     ledgerBalanced: ledger.charged === ledger.balances,
   };
 }
+
+export type Consistency = ReturnType<typeof consistencyFrom>;

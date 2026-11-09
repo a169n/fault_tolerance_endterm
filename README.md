@@ -85,8 +85,11 @@ generated randomly. `.env` is git-ignored. The midterm as submitted is tagged
 
     npm run demo            # live demo: app crash, DB failure, node failure, timetable
     npm run demo -- db-failure   # just one scenario
-    npm run exp app-crash   # one controlled experiment
-    npm run campaign        # all six against the deployed version
+    npm run exp app-crash -- --rep 1        # one controlled experiment (known-state restore first)
+    npm run campaign -- --reps 3            # every scenario x 3 against the deployed version
+    npm run campaign -- --reps 1 --only app-crash,db-failure
+    # results: reports/endterm/runs/<scenario>__<mode>__r<N>/metrics.json (alerts, resources,
+    # key-level integrity, acceptance); raw data: logs/endterm/<scenario>__<mode>__r<N>/
 
     # Monitoring is always on: Prometheus http://localhost:9090 (alerts: /alerts),
     # Grafana http://localhost:3000/d/university (anonymous read-only; admin password in .env)

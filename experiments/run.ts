@@ -1,13 +1,17 @@
-import { execFile } from 'node:child_process';
+// One experiment run: known-state restore, workload + fault injection, alert and resource capture,
+// key-level integrity, acceptance criteria. Usage: npm run exp <scenario> -- --rep N
+//   raw data -> logs/endterm/<scenario>__<mode>__r<N>/
+//   results  -> reports/endterm/runs/<scenario>__<mode>__r<N>/metrics.json (a RunResult, acceptance.ts)
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-import { mkdirSync, writeFileSync, statSync, openSync, readSync, closeSync } from 'node:fs';
-import { runWorkload, type Rec } from './workload.ts';
-import { SCENARIOS, dc } from './scenarios.ts';
+import { existsSync, mkdirSync, writeFileSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { computeMetrics, consistencyFrom } from './metrics.ts';
+import { login, runWorkload } from './workload.ts';
+import { CHAOS_PORTS, CHAOS_RESET, SCENARIOS, chaos, dc, dotEnv, psql } from './scenarios.ts';
+import { computeMetrics, consistencyFrom, type DbPaymentRow } from './metrics.ts';
+import { firingNow, pollAlerts } from './alerts.ts';
+import { sampleResources } from './resources.ts';
+import { alertCorrectness, evaluate, type Restore, type RunResult } from './acceptance.ts';
 
-const exec = promisify(execFile);
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const writeJsonlGz = (path: string, rows: unknown[]): void =>
@@ -15,11 +19,16 @@ const writeJsonlGz = (path: string, rows: unknown[]): void =>
 const ms = (v: number | null | undefined) => (v == null ? 'n/a' : `${v} ms`);
 const pctStr = (v: number | null) => (v == null ? 'n/a' : `${(v * 100).toFixed(2)} %`);
 const GATEWAY = 'http://localhost:8080';   // nginx: the entry point clients use
+const PROMETHEUS = 'http://localhost:9090';
 const INSTANCES = [8081, 8082, 3011, 3012, 3021, 3022, 3031, 3041, 3042, 3051];  // both gateways (direct) + every service replica + auth-1
+const HEALTH_WAIT_S = 90;
+const ALERTS_CLEAR_WAIT_MS = 60_000;
+const WORKLOAD_USER = 'bursar';            // endterm: staff, may read any student and pay for any student
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function readFrom(path: string, offset: number): string {
+  if (!existsSync(path)) return '';
   const size = statSync(path).size;
   if (size <= offset) return '';
   const fd = openSync(path, 'r');
@@ -29,75 +38,128 @@ function readFrom(path: string, offset: number): string {
   return buf.toString('utf8');
 }
 
-const psql = async (sql: string): Promise<string> => {
-  const { stdout } = await exec(
-    'docker',
-    ['compose', 'exec', '-T', 'postgres-primary', 'psql', '-U', 'postgres', '-d', 'university', '-t', '-A', '-F', '|', '-c', sql],
-    { cwd: ROOT },
-  );
-  return stdout.trim();
-};
+function parseArgs(argv: string[]): { name: string; rep: number } {
+  const name = argv[0];
+  let rep = 1;
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    const v = a.startsWith('--rep=') ? a.slice(6) : a === '--rep' ? argv[++i] : null;
+    if (v != null) rep = Number(v);
+  }
+  if (!Number.isInteger(rep) || rep < 0) throw new Error(`--rep must be a non-negative integer, got ${rep}`);
+  return { name, rep };
+}
 
-async function ensureHealthy(): Promise<void> {
-  process.stdout.write('  restoring platform ');
-  await dc('start');
-  for (let i = 0; i < 90; i++) {
+async function waitHealthy(): Promise<{ healthy: boolean; replicationStreaming: boolean }> {
+  let last = { healthy: false, replicationStreaming: false };
+  for (let i = 0; i < HEALTH_WAIT_S; i++) {
     const checks = await Promise.all(
       INSTANCES.map((p) =>
-        fetch(`http://localhost:${p}/health`, { signal: AbortSignal.timeout(1000) })
-          .then((r) => r.ok)
-          .catch(() => false),
+        fetch(`http://localhost:${p}/health`, { signal: AbortSignal.timeout(1000) }).then((r) => r.ok).catch(() => false),
       ),
     );
     const gw = await fetch(`${GATEWAY}/health`, { signal: AbortSignal.timeout(1000) }).then((r) => r.ok).catch(() => false);
     const repl = await psql('select count(*) from pg_stat_replication;').catch(() => '0');
-    if (checks.every(Boolean) && gw && repl.trim() === '1') {
-      console.log('ok (all instances up, standby streaming)');
-      return;
-    }
+    last = { healthy: checks.every(Boolean) && gw, replicationStreaming: repl.trim() === '1' };
+    if (last.healthy && last.replicationStreaming) return last;
     process.stdout.write('.');
     await sleep(1000);
   }
-  throw new Error('platform did not become healthy within 90 s');
+  return last;
+}
+
+// Known-state restore, before every run (Task 14): every container started, chaos reset on every
+// instance, the DB back to the seeded state, health and replication up, and no alert firing.
+async function restore(): Promise<Restore> {
+  const started = Date.now();
+  process.stdout.write('  restoring known state ');
+  await dc('start');
+  const { healthy, replicationStreaming } = await waitHealthy();
+  if (!healthy || !replicationStreaming) {
+    console.log(' FAILED');
+    return {
+      ok: false, durationMs: Date.now() - started, healthy, replicationStreaming, chaosReset: {}, dbReset: false,
+      alertsClear: null, firingAtStart: [], error: `platform not healthy within ${HEALTH_WAIT_S} s`,
+    };
+  }
+
+  const chaosReset: Record<string, boolean> = {};
+  for (const port of CHAOS_PORTS) chaosReset[port] = await chaos(port, CHAOS_RESET);
+
+  const dbReset = await psql(
+    "TRUNCATE payments; UPDATE students SET balance = 0; DELETE FROM students WHERE id !~ '^s[0-9]+$';",
+  ).then(() => true).catch((e) => { console.error(`\n  ! DB reset failed: ${(e as Error).message.split('\n')[0]}`); return false; });
+
+  // Wait until Prometheus has no firing alert, so every alert seen in the run belongs to this run.
+  let firing: string[] | null = null;
+  const alertsDeadline = Date.now() + ALERTS_CLEAR_WAIT_MS;
+  while (Date.now() < alertsDeadline) {
+    firing = await firingNow(PROMETHEUS).catch(() => null);
+    if (firing != null && firing.length === 0) break;
+    process.stdout.write('a');
+    await sleep(2000);
+  }
+  const alertsClear = firing == null ? null : firing.length === 0;
+  const ok = Object.values(chaosReset).every(Boolean) && dbReset && alertsClear === true;
+  console.log(ok ? ' ok (all instances up, standby streaming, chaos reset, DB reset, no alert firing)'
+    : ` partial: chaos ${JSON.stringify(chaosReset)}, db ${dbReset}, alerts clear ${alertsClear} ${JSON.stringify(firing ?? [])}`);
+  return {
+    ok, durationMs: Date.now() - started, healthy, replicationStreaming, chaosReset, dbReset,
+    alertsClear, firingAtStart: firing ?? [],
+  };
 }
 
 async function main(): Promise<void> {
-  const name = process.argv[2];
+  const { name, rep } = parseArgs(process.argv.slice(2));
   const scenario = SCENARIOS[name];
   if (!scenario) {
-    console.log(`usage: node experiments/run.ts <${Object.keys(SCENARIOS).join('|')}>`);
+    console.log(`usage: npm run exp <${Object.keys(SCENARIOS).join('|')}> -- --rep N`);
     process.exit(1);
   }
 
-  console.log(`\n=== ${scenario.title} (${name}) ===`);
-  await ensureHealthy();
+  console.log(`\n=== ${scenario.title} (${name}), repetition ${rep} ===`);
+  const restored = await restore();
+  if (!restored.healthy || !restored.replicationStreaming) {
+    throw new Error(`restore failed (${restored.error}); not running ${name} from an unknown state`);
+  }
 
   const health = await (await fetch(`${GATEWAY}/health`)).json();
-  const mode = health.ft ? 'ft' : 'baseline';
+  const mode: string = health.mode ?? (health.ft ? 'midterm' : 'baseline');  // pre-endterm gateways only report ft
   console.log(`  mode: ${mode.toUpperCase()}`);
 
-  // Operator reset between experiments. It runs as the superuser over `docker exec` (pg_hba.conf:
-  // local postgres trust), on purpose: resetting state is an operator action on the host, and the
-  // application role app_rw has no TRUNCATE (least privilege, Task 12). Never give app_rw this right.
-  await psql("TRUNCATE payments; UPDATE students SET balance = 0;");
+  let token: string | undefined;
+  if (mode === 'endterm') {
+    token = await login(GATEWAY, WORKLOAD_USER, dotEnv().DEMO_PASSWORD ?? '');
+    console.log(`  logged in as ${WORKLOAD_USER} (Authorization on every request)`);
+  }
 
-  const runId = `${name}-${mode}-${Date.now()}`;
+  const tag = `${name}__${mode}__r${rep}`;
+  const runId = `${name}-${mode}-r${rep}-${Date.now()}`;
   const eventsPath = `${ROOT}logs/events.jsonl`;
-  const eventsOffset = statSync(eventsPath).size;
+  const eventsOffset = existsSync(eventsPath) ? statSync(eventsPath).size : 0;
+
+  const capture = new AbortController();
+  const alertStats = { polls: 0, pollErrors: 0 };
+  const alertsP = pollAlerts(PROMETHEUS, capture.signal, alertStats);
+  const resourcesP = sampleResources(capture.signal);
+
   const t0 = Date.now();
   let injectTs = 0;
   let repairTs = 0;
+  const step = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
+    try { await fn(); } catch (e) { console.error(`  ! ${label}: ${(e as Error).message}`); }
+  };
 
-  setTimeout(async () => {
+  setTimeout(() => {
     injectTs = Date.now();
     console.log(`  T+${((injectTs - t0) / 1000).toFixed(1)}s  INJECT`);
-    await scenario.inject();
+    void step('inject', scenario.inject);
   }, scenario.injectAtMs);
 
-  setTimeout(async () => {
+  setTimeout(() => {
     repairTs = Date.now();
     console.log(`  T+${((repairTs - t0) / 1000).toFixed(1)}s  REPAIR`);
-    await scenario.repair();
+    void step('repair', scenario.repair);
   }, scenario.repairAtMs);
 
   console.log(`  running workload for ${scenario.durationMs / 1000}s ...`);
@@ -108,13 +170,16 @@ async function main(): Promise<void> {
     rampAtMs: scenario.rampAtMs,
     rampConcurrency: scenario.rampConcurrency,
     runId,
+    token,
   });
   const t1 = Date.now();
+  capture.abort();
+  const [alertObs, resources] = await Promise.all([alertsP, resourcesP]);
 
   const events = readFrom(eventsPath, eventsOffset)
     .split('\n')
     .filter(Boolean)
-    .map((l) => JSON.parse(l))
+    .flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } })
     .filter((e) => e.ts >= t0 - 2000 && e.ts <= t1 + 2000);
 
   const ledger = await psql(
@@ -128,23 +193,52 @@ async function main(): Promise<void> {
   ).catch(() => '0|0|0|0|0|0');
   const [completed, pending, rolledBack, failedPay, charged, balances] = ledger.split('|').map(Number);
 
-  const consistency = consistencyFrom(recs, {
-    completed, pending, rolledBack, failedPay, charged, balances,
-  });
+  // Key-level integrity: one row per payment (the state never contains '|', so split on the last one).
+  const dbRows: DbPaymentRow[] | null = await psql('select idempotency_key, state from payments;')
+    .then((out) => out.split('\n').filter(Boolean).map((line) => {
+      const i = line.lastIndexOf('|');
+      return { key: line.slice(0, i), state: line.slice(i + 1) };
+    }))
+    .catch(() => null);
 
-  const metrics = computeMetrics(recs, events, t0, t1, injectTs || t0 + scenario.injectAtMs);
+  const consistency = consistencyFrom(recs, { completed, pending, rolledBack, failedPay, charged, balances }, dbRows);
+  const effectiveInject = injectTs || t0 + scenario.injectAtMs;
+  const metrics = computeMetrics(recs, events, t0, t1, effectiveInject, { repairTs: repairTs || undefined, alerts: alertObs, resources });
+  const verify = scenario.verify
+    ? await scenario.verify().catch((e) => ({ error: (e as Error).message }))
+    : null;
 
-  const logDir = `${ROOT}logs/${name}__${mode}`;
-  const dir = `${ROOT}reports/runs/${name}__${mode}`;
+  const fired = metrics.alerts.filter((a) => a.fired).map((a) => a.name);
+  const result: RunResult = {
+    scenario: name, title: scenario.title, kind: scenario.kind, mode, rep, runId,
+    t0, t1, injectTs, repairTs,
+    restore: restored,
+    expectedAlerts: scenario.expectedAlerts,
+    alertCorrectness: alertCorrectness(scenario.expectedAlerts, fired),
+    metrics,
+    consistency,
+    verify,
+    acceptance: [],
+  };
+  result.acceptance = evaluate(scenario, result);
+
+  const logDir = `${ROOT}logs/endterm/${tag}`;
+  const dir = `${ROOT}reports/endterm/runs/${tag}`;
   mkdirSync(logDir, { recursive: true });
   mkdirSync(dir, { recursive: true });
   writeJsonlGz(`${logDir}/workload.jsonl`, recs);
   writeJsonlGz(`${logDir}/events.jsonl`, events);
-  writeFileSync(`${dir}/metrics.json`, JSON.stringify({ scenario: name, mode, t0, t1, injectTs, repairTs, metrics, consistency }, null, 2));
+  writeJsonlGz(`${logDir}/resources.jsonl`, resources);
+  writeFileSync(`${logDir}/alerts.json`, JSON.stringify({ promUrl: PROMETHEUS, ...alertStats, observations: alertObs }, null, 2));
+  writeFileSync(`${dir}/metrics.json`, JSON.stringify(result, null, 2));
 
+  const passed = result.acceptance.filter((a) => a.pass).length;
   console.log(`  availability ${pctStr(metrics.availability.requestBased)} req / ${pctStr(metrics.availability.timeBased)} time` +
-    ` | failed ${metrics.requests.failed}/${metrics.requests.total}` +
+    ` | failed ${metrics.requests.failed}/${metrics.requests.total} (429: ${metrics.requests.rateLimited})` +
     ` | detect ${ms(metrics.response.detectionMs)} | recover ${ms(metrics.response.recoveryMs)}`);
+  console.log(`  alerts fired [${fired.join(', ') || 'none'}] ${result.alertCorrectness.correct ? 'correct' : 'INCORRECT'}` +
+    ` | lost ${consistency.lostRecords ?? 'n/a'} dup ${consistency.duplicateCharges} orphaned ${consistency.orphanedPending}` +
+    ` | acceptance ${passed}/${result.acceptance.length}`);
   console.log(`  -> ${dir.replace(ROOT, '')}/metrics.json, raw data in ${logDir.replace(ROOT, '')}/`);
 }
 
