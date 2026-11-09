@@ -99,7 +99,8 @@ After pulling schema changes, recreate the database once: `docker compose down -
 
 | Component | Port | Instances |
 |---|---|---|
-| gateway | 8080 | 1 |
+| nginx (entry point) | 8080 | 1; `config/nginx/single.conf` (baseline, midterm) or `redundant.conf` (endterm) |
+| gateway-1 / gateway-2 | 127.0.0.1:8081 / 8082 | 2; only endterm puts gateway-2 in nginx rotation |
 | student-1 / student-2 | 3011 / 3012 | 2 replicas |
 | payment-1 / payment-2 | 3021 / 3022 | 2 replicas |
 | timetable-1 / timetable-2 | 3041 / 3042 | 2 replicas |

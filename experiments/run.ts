@@ -14,8 +14,8 @@ const writeJsonlGz = (path: string, rows: unknown[]): void =>
   writeFileSync(`${path}.gz`, gzipSync(Buffer.from(rows.map((r) => JSON.stringify(r)).join('\n') + '\n')));
 const ms = (v: number | null | undefined) => (v == null ? 'n/a' : `${v} ms`);
 const pctStr = (v: number | null) => (v == null ? 'n/a' : `${(v * 100).toFixed(2)} %`);
-const GATEWAY = 'http://localhost:8080';
-const INSTANCES = [3011, 3012, 3021, 3022, 3031, 3041, 3042];
+const GATEWAY = 'http://localhost:8080';   // nginx: the entry point clients use
+const INSTANCES = [8081, 8082, 3011, 3012, 3021, 3022, 3031, 3041, 3042];  // both gateways (direct) + every service replica
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

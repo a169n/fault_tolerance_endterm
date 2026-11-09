@@ -13,5 +13,5 @@ const existing = existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')) :
 writeFileSync(envFile, formatEnv(buildEnv(arg, existing)), { mode: 0o600 });  // compose reads mode + secrets from .env
 try { chmodSync(envFile, 0o600); } catch { /* not supported on every filesystem (Windows) */ }
 console.log(`mode: ${arg}`);
-const r = spawnSync('docker', ['compose', 'up', '-d', '--build'], { stdio: 'inherit', cwd: new URL('..', import.meta.url) });
+const r = spawnSync('docker', ['compose', 'up', '-d', '--build', '--remove-orphans'], { stdio: 'inherit', cwd: new URL('..', import.meta.url) });
 process.exit(r.status ?? 1);

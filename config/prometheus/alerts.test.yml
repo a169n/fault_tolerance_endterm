@@ -71,11 +71,11 @@ tests:
         exp_alerts: []
 
   # ---------------------------------------------------------------- HighErrorRate
-  - interval: 2s               # 10 of 100 gateway responses per scrape are 5xx: 10% > 5%
+  - interval: 2s               # 10 of 100 responses across both gateways are 5xx: 10% > 5%
     input_series:
-      - series: 'http_requests_total{svc="gateway", method="GET", route="/api/{pool}/{path:path}", status="200"}'
+      - series: 'http_requests_total{svc="gateway-1", method="GET", route="/api/{pool}/{path:path}", status="200"}'
         values: '0+90x20'
-      - series: 'http_requests_total{svc="gateway", method="GET", route="/api/{pool}/{path:path}", status="503"}'
+      - series: 'http_requests_total{svc="gateway-2", method="GET", route="/api/{pool}/{path:path}", status="503"}'
         values: '0+10x20'
       - series: 'http_requests_total{svc="student-1", method="GET", route="/students/{id}", status="200"}'
         values: '0+1000x20'    # services behind the gateway are not part of the ratio
@@ -92,9 +92,9 @@ tests:
 
   - interval: 2s               # 4% 5xx: under the threshold
     input_series:
-      - series: 'http_requests_total{svc="gateway", method="GET", route="/api/{pool}/{path:path}", status="200"}'
+      - series: 'http_requests_total{svc="gateway-1", method="GET", route="/api/{pool}/{path:path}", status="200"}'
         values: '0+96x20'
-      - series: 'http_requests_total{svc="gateway", method="GET", route="/api/{pool}/{path:path}", status="503"}'
+      - series: 'http_requests_total{svc="gateway-1", method="GET", route="/api/{pool}/{path:path}", status="503"}'
         values: '0+4x20'
     alert_rule_test:
       - eval_time: 8s
@@ -103,7 +103,7 @@ tests:
 
   - interval: 2s               # 5xx on a backend service only: not a gateway error rate
     input_series:
-      - series: 'http_requests_total{svc="gateway", method="GET", route="/api/{pool}/{path:path}", status="200"}'
+      - series: 'http_requests_total{svc="gateway-1", method="GET", route="/api/{pool}/{path:path}", status="200"}'
         values: '0+100x20'
       - series: 'http_requests_total{svc="student-1", method="GET", route="/students/{id}", status="503"}'
         values: '0+100x20'
@@ -115,15 +115,15 @@ tests:
   # ---------------------------------------------------------------- HighLatencyP95
   - interval: 2s               # every request lands in (1s, 2.5s]: p95 > 1s
     input_series:
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="0.5"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="0.5"}'
         values: '0x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="0.8"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="0.8"}'
         values: '0x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="1"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="1"}'
         values: '0x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="2.5"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="2.5"}'
         values: '0+50x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="+Inf"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="+Inf"}'
         values: '0+50x20'
     alert_rule_test:
       - eval_time: 8s
@@ -138,15 +138,15 @@ tests:
 
   - interval: 2s               # every request lands in (0.5s, 0.8s]: p95 under 1s
     input_series:
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="0.5"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="0.5"}'
         values: '0x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="0.8"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="0.8"}'
         values: '0+50x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="1"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="1"}'
         values: '0+50x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="2.5"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="2.5"}'
         values: '0+50x20'
-      - series: 'http_request_duration_seconds_bucket{svc="gateway", route="/api/{pool}/{path:path}", le="+Inf"}'
+      - series: 'http_request_duration_seconds_bucket{svc="gateway-1", route="/api/{pool}/{path:path}", le="+Inf"}'
         values: '0+50x20'
     alert_rule_test:
       - eval_time: 8s
@@ -156,7 +156,7 @@ tests:
   # ---------------------------------------------------------------- AuthFailureSpike
   - interval: 2s               # 6 denials per 2s scrape = 3/s > 2/s
     input_series:
-      - series: 'auth_denied_total{svc="gateway", reason="bad_signature"}'
+      - series: 'auth_denied_total{svc="gateway-1", reason="bad_signature"}'
         values: '0+6x30'
     # rate() over [30s] divides by the whole window, so a spike that starts at t=0 only
     # crosses 2/s once more than 60 denials are inside it: pending at 22s, firing at 26s
@@ -177,7 +177,7 @@ tests:
 
   - interval: 2s               # 3 denials per 2s scrape = 1.5/s: a user mistyping, not an attack
     input_series:
-      - series: 'auth_denied_total{svc="gateway", reason="bad_signature"}'
+      - series: 'auth_denied_total{svc="gateway-1", reason="bad_signature"}'
         values: '0+3x30'
     alert_rule_test:
       - eval_time: 60s         # window fully covered: 1.5/s

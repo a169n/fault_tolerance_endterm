@@ -96,11 +96,20 @@ def _ejection_outcome(outliers: Optional[outlier_ejection.OutlierDetector]):
     return lambda instance, outcome: outliers.record(instance, outcome == "ok")  # error|timeout count
 
 
+def _has_idempotency_key(request: Request) -> bool:
+    return bool((request.headers.get("idempotency-key") or "").strip())
+
+
 async def proxy(pool: str, request: Request, path: str):
     if not POOLS.get(pool):
         return JSONResponse(status_code=404, content={"error": "unknown service"})
 
     method = request.method
+    if pool == "payments" and method == "POST" and endterm_enabled() and not _has_idempotency_key(request):
+        # nginx may re-send this POST to the other gateway (redundant.conf). A key made up here would
+        # differ per gateway and charge twice, so in endterm only the client may supply it.
+        log(kind="rejected", target=pool, reason="missing_idempotency_key")
+        return JSONResponse(status_code=400, content={"error": "Idempotency-Key header required"})
     body = await request.body()
     target_path = f"/{path}" if path else "/"
     query = request.url.query

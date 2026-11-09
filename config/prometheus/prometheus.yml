@@ -16,7 +16,8 @@ scrape_configs:
   - job_name: university
     static_configs:
       - targets:
-          - gateway:8080          # Task 7 replaces this with gateway-1:8080, gateway-2:8080
+          - gateway-1:8080        # both gateways in every mode; only endterm puts gateway-2 in nginx rotation
+          - gateway-2:8080
           - student-1:3000
           - student-2:3000
           - payment-1:3000
