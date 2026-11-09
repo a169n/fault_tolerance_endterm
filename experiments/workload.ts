@@ -11,6 +11,7 @@ export type Rec = {
   retry?: boolean;   // a client-side resend of the same intent
   rid: string;       // x-request-id sent with the request: <runId>-<n>, greppable in logs/events.jsonl
   rateLimited: boolean;  // 429 from the endterm rate limiter
+  payState?: string; // payments: `state` from the response body (a 200 resend can carry pending/rolled_back)
 };
 
 export type WorkloadOpts = {
@@ -82,11 +83,19 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
 
     try {
       const res = await fetch(url, init);
-      await res.text();
+      const text = await res.text();
+      let payState: string | undefined;
+      if (op === 'payments') {
+        try {
+          const st = (JSON.parse(text) as { state?: unknown }).state;
+          if (typeof st === 'string') payState = st;
+        } catch { /* not JSON: no state */ }
+      }
       recs.push({
         ts: started, op, status: res.status, ok: res.status < 400,
         degraded: res.status === 203, ms: Date.now() - started, intent, retry,
         rid, rateLimited: res.status === 429,
+        ...(payState !== undefined ? { payState } : {}),
       });
     } catch (e) {
       const abandoned = windowOver.signal.aborted && Date.now() - started < clientTimeoutMs;

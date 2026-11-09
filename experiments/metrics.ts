@@ -194,27 +194,54 @@ export type Ledger = {
 
 export type DbPaymentRow = { key: string; state: string };
 
-const ACKED = (r: Rec) => r.status === 200 || r.status === 201;
+// The ledger totals query's output: six '|'-separated numbers. Anything else (an empty or partial
+// answer) is null: unmeasured, never zeros.
+export function parseLedger(out: string | null | undefined): Ledger | null {
+  if (out == null) return null;
+  const parts = out.trim().split('|');
+  if (parts.length !== 6 || parts.some((p) => p.trim() === '')) return null;
+  const n = parts.map(Number);
+  if (n.some((x) => !Number.isFinite(x))) return null;
+  const [completed, pending, rolledBack, failedPay, charged, balances] = n;
+  return { completed, pending, rolledBack, failedPay, charged, balances };
+}
+
+// A payment is acknowledged when the client was told it completed: 201 (a fresh charge) or 200 with
+// state 'completed' (a resend answered with the stored result). A resend of a payment whose first
+// attempt crashed after the checkpoint gets 200 with the stored row, state 'pending' (or 'rolled_back'):
+// that is not a completion, so it is not an acknowledgement; it is reported as ackedNotCompleted.
+const ACKED = (r: Rec) => r.status === 201 || (r.status === 200 && r.payState === 'completed');
+const ACKED_NOT_COMPLETED = (r: Rec) => r.status === 200 && r.payState !== 'completed';
 
 // Payment integrity from the client's view (recs) and the DB's (ledger totals and, when available,
 // one row per payment: idempotency key and state).
-//   lostRecords    intents acknowledged with 200/201 but not `completed` in the DB
+// `ledger` is null when the totals query failed: the ledger fields are then null (not zeros), so the
+// criteria that read them fail instead of passing on data that was never measured.
+//   lostRecords    intents acknowledged (201, or 200 + state 'completed') but not `completed` in the DB
 //   phantomRecords `completed` in the DB with no 2xx acknowledgement (allowed: the ack was lost; reported)
 //   duplicateCharges  DB: completed rows per key beyond the first (the UNIQUE constraint makes this 0,
 //                  so the check proves it) + client: 201 answers per intent beyond the first
 // Baseline stores a fresh UUID per request and ignores Idempotency-Key, so no DB key matches a client
 // intent; the key-level checks then fall back to counts (integrityBasis: 'count').
-export function consistencyFrom(recs: Rec[], ledger: Ledger, dbRows?: DbPaymentRow[] | null) {
+export function consistencyFrom(recs: Rec[], ledger: Ledger | null, dbRows?: DbPaymentRow[] | null) {
   const payments = recs.filter((r) => r.op === 'payments');
   const chargesPerIntent = new Map<string, number>();
   const intents = new Set<string>();
   const acked = new Set<string>();
+  const ackedNotCompletedByState: Record<string, number> = {};
+  const ackedNotCompletedIntents = new Set<string>();
   for (const r of payments) {
     const intent = String(r.intent);
     intents.add(intent);
     if (ACKED(r)) acked.add(intent);
+    if (ACKED_NOT_COMPLETED(r)) {
+      const st = r.payState ?? 'unknown';
+      ackedNotCompletedByState[st] = (ackedNotCompletedByState[st] ?? 0) + 1;
+      ackedNotCompletedIntents.add(intent);
+    }
     if (r.status === 201) chargesPerIntent.set(intent, (chargesPerIntent.get(intent) ?? 0) + 1);
   }
+  for (const k of acked) ackedNotCompletedIntents.delete(k);  // a later real ack supersedes the misleading 200
   let duplicatesClient = 0;
   for (const n of chargesPerIntent.values()) duplicatesClient += Math.max(0, n - 1);
 
@@ -253,6 +280,11 @@ export function consistencyFrom(recs: Rec[], ledger: Ledger, dbRows?: DbPaymentR
     distinctPaymentIntents: intents.size,
     acknowledgedIntents: acked.size,
     deduplicatedResponses: payments.filter((r) => r.status === 200).length,
+    // HTTP 200 whose body state is not 'completed' (e.g. a resend of a crashed payment: pending).
+    // Not counted as acknowledged; reported so the misleading 200 stays visible.
+    ackedNotCompleted: payments.filter(ACKED_NOT_COMPLETED).length,
+    ackedNotCompletedByState,
+    ackedNotCompletedIntents: ackedNotCompletedIntents.size,  // intents whose only 200s were not completed
     duplicateCharges: duplicatesClient + (duplicatesDb ?? 0),
     duplicateChargesClient: duplicatesClient,
     duplicateChargesDb: duplicatesDb,
@@ -262,13 +294,14 @@ export function consistencyFrom(recs: Rec[], ledger: Ledger, dbRows?: DbPaymentR
     lostIntents: lostIntents.slice(0, 50),  // the first 50, for diagnosis; lostRecords is the full count
     phantomRecords,
     dbRows: dbRows ? dbRows.length : null,
-    completedInDb: ledger.completed,
-    dbVsIntents: ledger.completed - intents.size,
-    orphanedPending: ledger.pending,
-    rolledBack: ledger.rolledBack,
-    failedPay: ledger.failedPay,
-    totalCharged: ledger.charged,
-    ledgerBalanced: ledger.charged === ledger.balances,
+    ledgerMeasured: ledger != null,
+    completedInDb: ledger ? ledger.completed : null,
+    dbVsIntents: ledger ? ledger.completed - intents.size : null,
+    orphanedPending: ledger ? ledger.pending : null,
+    rolledBack: ledger ? ledger.rolledBack : null,
+    failedPay: ledger ? ledger.failedPay : null,
+    totalCharged: ledger ? ledger.charged : null,
+    ledgerBalanced: ledger ? ledger.charged === ledger.balances : null,
   };
 }
 

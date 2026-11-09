@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, writeFileSync, statSync, openSync, readSync, clo
 import { gzipSync } from 'node:zlib';
 import { login, runWorkload } from './workload.ts';
 import { CHAOS_PORTS, CHAOS_RESET, SCENARIOS, chaos, dc, dotEnv, psql } from './scenarios.ts';
-import { computeMetrics, consistencyFrom, type DbPaymentRow } from './metrics.ts';
+import { computeMetrics, consistencyFrom, parseLedger, type DbPaymentRow } from './metrics.ts';
 import { firingNow, pollAlerts } from './alerts.ts';
 import { sampleResources } from './resources.ts';
 import { alertCorrectness, evaluate, type Restore, type RunResult } from './acceptance.ts';
@@ -182,7 +182,21 @@ async function main(): Promise<void> {
     .flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } })
     .filter((e) => e.ts >= t0 - 2000 && e.ts <= t1 + 2000);
 
-  const ledger = await psql(
+  // The DB may still be coming back (e.g. right after a db-failure repair): retry, and if it never
+  // answers, record the ledger and the rows as unmeasured (null), never as zeros.
+  const queryWithRetry = async (sql: string, what: string): Promise<string | null> => {
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        return await psql(sql);
+      } catch (e) {
+        console.error(`  ! ${what} query failed (attempt ${attempt}/5): ${(e as Error).message.split('\n')[0]}`);
+        if (attempt < 5) await new Promise((r) => setTimeout(r, 2_000));
+      }
+    }
+    return null;
+  };
+
+  const ledger = parseLedger(await queryWithRetry(
     `select
        (select count(*) from payments where state='completed'),
        (select count(*) from payments where state='pending'),
@@ -190,18 +204,19 @@ async function main(): Promise<void> {
        (select count(*) from payments where state='failed'),
        (select coalesce(sum(amount),0) from payments where state='completed'),
        (select coalesce(sum(balance),0) from students);`,
-  ).catch(() => '0|0|0|0|0|0');
-  const [completed, pending, rolledBack, failedPay, charged, balances] = ledger.split('|').map(Number);
+    'ledger',
+  ));
+  if (!ledger) console.error('  ! ledger not measured: ledger fields are null and the criteria that read them fail');
 
   // Key-level integrity: one row per payment (the state never contains '|', so split on the last one).
-  const dbRows: DbPaymentRow[] | null = await psql('select idempotency_key, state from payments;')
-    .then((out) => out.split('\n').filter(Boolean).map((line) => {
+  const rowsOut = await queryWithRetry('select idempotency_key, state from payments;', 'payment rows');
+  const dbRows: DbPaymentRow[] | null = rowsOut == null ? null
+    : rowsOut.split('\n').filter(Boolean).map((line) => {
       const i = line.lastIndexOf('|');
       return { key: line.slice(0, i), state: line.slice(i + 1) };
-    }))
-    .catch(() => null);
+    });
 
-  const consistency = consistencyFrom(recs, { completed, pending, rolledBack, failedPay, charged, balances }, dbRows);
+  const consistency = consistencyFrom(recs, ledger, dbRows);
   const effectiveInject = injectTs || t0 + scenario.injectAtMs;
   const metrics = computeMetrics(recs, events, t0, t1, effectiveInject, { repairTs: repairTs || undefined, alerts: alertObs, resources });
   const verify = scenario.verify
@@ -237,7 +252,7 @@ async function main(): Promise<void> {
     ` | failed ${metrics.requests.failed}/${metrics.requests.total} (429: ${metrics.requests.rateLimited})` +
     ` | detect ${ms(metrics.response.detectionMs)} | recover ${ms(metrics.response.recoveryMs)}`);
   console.log(`  alerts fired [${fired.join(', ') || 'none'}] ${result.alertCorrectness.correct ? 'correct' : 'INCORRECT'}` +
-    ` | lost ${consistency.lostRecords ?? 'n/a'} dup ${consistency.duplicateCharges} orphaned ${consistency.orphanedPending}` +
+    ` | lost ${consistency.lostRecords ?? 'n/a'} dup ${consistency.duplicateCharges} orphaned ${consistency.orphanedPending ?? 'n/a'}` +
     ` | acceptance ${passed}/${result.acceptance.length}`);
   console.log(`  -> ${dir.replace(ROOT, '')}/metrics.json, raw data in ${logDir.replace(ROOT, '')}/`);
 }

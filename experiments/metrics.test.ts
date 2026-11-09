@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeMetrics, consistencyFrom, outages, pct, throughput } from './metrics.ts';
+import { computeMetrics, consistencyFrom, outages, parseLedger, pct, throughput } from './metrics.ts';
 import { foldAlerts, type AlertObs } from './alerts.ts';
 import { parseStatsLine, summarizeResources } from './resources.ts';
 import type { Rec } from './workload.ts';
@@ -18,8 +18,11 @@ function recsWithGap(): Rec[] {
 }
 
 const ledger = { completed: 0, pending: 0, rolledBack: 0, failedPay: 0, charged: 0, balances: 0 };
-const pay = (intent: string, status: number): Rec => ({
+// payState mirrors the response body's `state`: 201 answers carry 'completed'; a 200 resend carries
+// whatever the stored row holds, so tests pass it explicitly.
+const pay = (intent: string, status: number, payState?: string): Rec => ({
   ts: T0, op: 'payments', status, ok: status < 400, degraded: false, ms: 5, intent, rid: `rid-${intent}`, rateLimited: status === 429,
+  payState: payState ?? (status === 201 ? 'completed' : undefined),
 });
 
 test('outages: one 3 s run of failures -> one outage of about 3000 ms', () => {
@@ -39,7 +42,7 @@ test('pct is nearest-rank: pct([1..100], 95) === 95', () => {
 });
 
 test('consistencyFrom: lostRecords === 1 when one acknowledged intent is missing from the DB rows', () => {
-  const recs = [pay('k1', 201), pay('k2', 201), pay('k3', 200)];
+  const recs = [pay('k1', 201), pay('k2', 201), pay('k3', 200, 'completed')];
   const rows = [{ key: 'k1', state: 'completed' }, { key: 'k2', state: 'completed' }];  // k3 acknowledged, not in the DB
   const c = consistencyFrom(recs, { ...ledger, completed: 2 }, rows);
   assert.equal(c.lostRecords, 1);
@@ -54,6 +57,62 @@ test('consistencyFrom: an acknowledged intent rolled back in the DB is lost; a c
   const c = consistencyFrom(recs, { ...ledger, completed: 1, rolledBack: 1 }, rows);
   assert.equal(c.lostRecords, 1);
   assert.equal(c.phantomRecords, 1);
+});
+
+test('consistencyFrom: 200 with state pending (resend of a crashed payment), then rolled back in the DB, is not lost', () => {
+  // payment-1 crashed after the checkpoint; the gateway retried on payment-2, which answered the
+  // duplicate key with 200 {duplicate:true, state:'pending'}; the orphan sweep then rolled it back.
+  const recs = [pay('k1', 200, 'pending'), pay('k2', 201)];
+  const rows = [{ key: 'k1', state: 'rolled_back' }, { key: 'k2', state: 'completed' }];
+  const c = consistencyFrom(recs, { ...ledger, completed: 1, rolledBack: 1 }, rows);
+  assert.equal(c.lostRecords, 0);
+  assert.deepEqual(c.lostIntents, []);
+  assert.equal(c.acknowledgedIntents, 1);
+  assert.equal(c.ackedNotCompleted, 1);
+  assert.deepEqual(c.ackedNotCompletedByState, { pending: 1 });
+  assert.equal(c.ackedNotCompletedIntents, 1);
+  assert.equal(c.phantomRecords, 0);
+});
+
+test('consistencyFrom: 200 with state completed (a resend after a real charge) is acknowledged', () => {
+  const recs = [pay('k1', 200, 'completed'), pay('k2', 200)];  // k2: 200 with no state in the body
+  const rows = [{ key: 'k2', state: 'completed' }];
+  const c = consistencyFrom(recs, { ...ledger, completed: 1 }, rows);
+  assert.equal(c.acknowledgedIntents, 1);
+  assert.equal(c.lostRecords, 1);           // k1 acknowledged as completed, but not in the DB
+  assert.deepEqual(c.lostIntents, ['k1']);
+  assert.equal(c.ackedNotCompleted, 1);     // k2: 200 that never said completed
+  assert.deepEqual(c.ackedNotCompletedByState, { unknown: 1 });
+  assert.equal(c.phantomRecords, 1);        // k2 completed in the DB with no acknowledgement
+});
+
+test('consistencyFrom: a later real acknowledgement supersedes an earlier 200 pending for the same intent', () => {
+  const recs = [pay('k1', 200, 'pending'), pay('k1', 200, 'completed')];
+  const c = consistencyFrom(recs, { ...ledger, completed: 1 }, [{ key: 'k1', state: 'completed' }]);
+  assert.equal(c.ackedNotCompleted, 1);
+  assert.equal(c.ackedNotCompletedIntents, 0);
+  assert.equal(c.lostRecords, 0);
+});
+
+test('consistencyFrom: ledger not measured (null) -> ledger fields are null, not zeros', () => {
+  const c = consistencyFrom([pay('k1', 201)], null, [{ key: 'k1', state: 'completed' }]);
+  assert.equal(c.ledgerMeasured, false);
+  assert.equal(c.ledgerBalanced, null);
+  assert.equal(c.orphanedPending, null);
+  assert.equal(c.completedInDb, null);
+  assert.equal(c.totalCharged, null);
+  assert.equal(c.dbVsIntents, null);
+  assert.equal(c.lostRecords, 0);  // key-level checks still use the rows when those were read
+});
+
+test('parseLedger: six numbers -> totals; empty, partial or non-numeric output -> null', () => {
+  assert.deepEqual(parseLedger('3|1|2|0|300.00|300.00'),
+    { completed: 3, pending: 1, rolledBack: 2, failedPay: 0, charged: 300, balances: 300 });
+  assert.equal(parseLedger(null), null);
+  assert.equal(parseLedger(''), null);
+  assert.equal(parseLedger('3|1|2'), null);
+  assert.equal(parseLedger('3|1|2|0||300'), null);
+  assert.equal(parseLedger('a|b|c|d|e|f'), null);
 });
 
 test('consistencyFrom: duplicate charges add the DB count (completed rows per key > 1) to the client-side count', () => {

@@ -63,6 +63,10 @@ test('criteria helpers read metrics.json fields', () => {
   assert.equal(criteria.noLostRecords().check(run({ consistency: { lostRecords: null } })), false);  // unknown is not a pass
   assert.equal(criteria.noOrphanedPending().check(r), true);
   assert.equal(criteria.ledgerBalanced().check(r), true);
+  // ledger query failed: consistencyFrom reports null, which must fail, not pass as 0 === 0
+  const unmeasured = run({ consistency: { duplicateCharges: 0, lostRecords: 0, orphanedPending: null, ledgerBalanced: null } });
+  assert.equal(criteria.ledgerBalanced().check(unmeasured), false);
+  assert.equal(criteria.noOrphanedPending().check(unmeasured), false);
   assert.equal(criteria.p95AtMost(1_000).check(r), true);
   assert.equal(criteria.errorRateAtMost(0.01).check(r), true);
   assert.equal(criteria.noRateLimited().check(r), true);
