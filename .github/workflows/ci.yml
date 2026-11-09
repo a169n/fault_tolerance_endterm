@@ -68,7 +68,9 @@ jobs:
           done
 
   # Dependency check (THREAT-MODEL.md B5.T1). A known vulnerability fails this job; findings are
-  # recorded in the report (reports/endterm/deps/) rather than silenced with --ignore-vuln.
+  # recorded in the report (reports/endterm/security/, REPORT.md §5.4) rather than silenced with
+  # --ignore-vuln. With the upgraded pins (PyJWT 2.15.1, FastAPI 0.162.2, Starlette 1.10.0) the same
+  # command reports no known vulnerabilities (reports/endterm/security/pip-audit-after.json).
   deps:
     runs-on: ubuntu-latest
     timeout-minutes: 15

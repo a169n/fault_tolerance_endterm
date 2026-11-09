@@ -92,7 +92,9 @@ reports/                  everything written up
     ├── ALERTS.md             the 6 alert rules: what, threshold, response
     ├── TEST-PLAN.md          test levels, E1–E10 with hypotheses and acceptance criteria
     ├── DEMO.md               demonstration script
-    ├── deps/                 pip-audit output
+    ├── deps/                 first pip-audit output (pre-upgrade pins)
+    ├── security/             pip-audit before and after the PyJWT/FastAPI upgrade (REPORT.md §5.4)
+    ├── post-upgrade/         post-upgrade check: 4 endterm scenarios × 1 run, outside the campaign
     └── runs/<scenario>__<mode>__r<N>/metrics.json   one file per run
 ```
 

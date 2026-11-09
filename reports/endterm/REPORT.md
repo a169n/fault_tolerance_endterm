@@ -10,8 +10,9 @@ and the methodology; they were written before the results and do not depend on t
 and 10 report and discuss the three-mode campaign (90 runs). Every measured endterm number traces to
 [`RESULTS.md`](RESULTS.md), [`results.csv`](results.csv), a run's `metrics.json` or, where marked,
 the raw logs under `logs/endterm/`. Midterm numbers are cited from the committed midterm report
-(`reports/REPORT.md`) or comparison (`reports/COMPARISON.md`), and the dependency-audit count of §5.4
-from its committed output file.
+(`reports/REPORT.md`) or comparison (`reports/COMPARISON.md`). The dependency-audit counts of §5.4
+come from the committed `pip-audit` output files, and the post-upgrade check of §5.4 from the
+`metrics.json` files under `reports/endterm/post-upgrade/`.
 
 ---
 
@@ -280,11 +281,11 @@ boundaries of the data-flow diagram (also drawn in [`ARCHITECTURE.md`](../ARCHIT
 | B2 nginx → gateways | proxied requests, failover re-sends | gateway as SPOF, double charge on a re-sent POST, skipping nginx | two gateways, client `Idempotency-Key`, loopback-only gateway ports, the PEP in the gateway itself |
 | B3 gateways → services and auth | internal HTTP | a compromised container calling services directly, chaos-endpoint abuse, tokens leaking downstream, auth outage | service-side validation, chaos token, only three headers forwarded, local token verification |
 | B4 services → PostgreSQL | SQL, replication, exporter | `trust` logins, SQL injection, destructive SQL, lost/duplicate records, primary down | `scram-sha-256`, parameterised SQL, `app_rw` without DELETE/TRUNCATE/DDL, S5/S6, standby reads |
-| B5 host | operator, `.env`, logs | committed or shared secrets, exposed internal ports, vulnerable dependencies | generated secrets, loopback-only ports, pinned versions, `pip-audit` in CI |
+| B5 host | operator, `.env`, logs | committed or shared secrets, exposed internal ports, vulnerable dependencies | generated secrets, loopback-only ports, pinned versions, `pip-audit` in CI (its 24 findings fixed by upgrading PyJWT and FastAPI/Starlette, §5.4) |
 
 Actors in scope: anonymous clients, authenticated students trying to exceed their rights, a stolen
 student token (bounded by its 900 s lifetime and the student's own rights), and faulty components.
-Out of scope: a malicious insider with root on the host. THREAT-MODEL.md §10 lists thirteen residual
+Out of scope: a malicious insider with root on the host. THREAT-MODEL.md §10 lists fourteen residual
 risks the design accepts, among them no mTLS between services (R1), per-gateway rate-limit state (R2),
 no token revocation (R3), one shared HS256 key (R5), an audit log that is not tamper-evident (R6) and
 no TLS on the public listener (R7).
@@ -600,15 +601,68 @@ The aim is not only to block an attack but to keep it contained, visible and rec
 - **Recover and verify.** After an attack the harness checks that no attacker payment and no `evil-*`
   student reached the database and that the ledger balances.
 
-### 5.4 Known dependency findings
+### 5.4 Dependency findings and their remediation
 
-The `pip-audit` run recorded in `reports/endterm/deps/pip-audit-2026-11-09.tsv` (the same command as
-the CI job `deps`) reports 24 known vulnerabilities in 2 of 26 resolved packages: `pyjwt 2.10.1` and
-`starlette 0.41.3` (a dependency of FastAPI). They are recorded, not suppressed with `--ignore-vuln`.
-The dependencies are pinned to the exact versions of the plan's tech stack; upgrading PyJWT and
-FastAPI/Starlette to fixed versions is the first item of follow-up work. The JWT code accepts only
-HS256 with explicit `iss`/`aud`/`exp` checks and is covered by the `test_verify_rejects_*` tests, but
-this report makes no claim that this mitigates any specific advisory.
+**What the control found.** `pip-audit -r requirements.txt` (pip-audit 2.7.3, the command of the CI
+job `deps`) reported 24 known vulnerabilities in 2 of 26 resolved packages: 17 advisories for
+`pyjwt 2.10.1` (fix versions 2.12.0 to 2.15.0; one disputed advisory, PYSEC-2025-183, names no fix
+version and is not reported for the upgraded version) and 7 for `starlette 0.41.3`, which `fastapi 0.115.6`
+pulled in (fixed in 0.47.2 to 1.3.1). The first run is recorded in
+`reports/endterm/deps/pip-audit-2026-11-09.tsv` (and `.json`); it was reproduced before the upgrade
+in [`security/pip-audit-before.json`](security/pip-audit-before.json), with the same 24 advisory IDs.
+They were not suppressed with `--ignore-vuln`.
+
+**What was upgraded.** Only the pins needed to clear the advisories changed in `requirements.txt`:
+
+| Package | Before | After | Why |
+|---|---|---|---|
+| `PyJWT` | 2.10.1 | 2.15.1 | newest release; clears all 17 PyJWT advisories |
+| `fastapi` | 0.115.6 | 0.162.2 | newest release; allows Starlette 1.x (`starlette>=0.46.0`) |
+| `starlette` | 0.41.3 (transitive, unpinned) | 1.10.0 (now pinned explicitly) | newest release; clears all 7 Starlette advisories (the highest fix version is 1.3.1) |
+| `uvicorn[standard]`, `httpx`, `psycopg[binary,pool]`, `prometheus-client` | unchanged | unchanged | not affected, and no compatibility change was needed |
+
+No application or test code had to change: the service middleware, exception handlers, pydantic
+models, `TestClient`-based unit tests and the strict JWT verification in `app/security/tokens.py`
+work unchanged on FastAPI 0.162.2, Starlette 1.10.0 and PyJWT 2.15.1. The images were rebuilt from
+the new pins.
+
+**Verification after the upgrade.**
+
+- `pip-audit -r requirements.txt` now reports no known vulnerabilities in 28 resolved packages
+  ([`security/pip-audit-after.json`](security/pip-audit-after.json)). The CI job `deps` runs the same
+  command and is therefore expected to pass.
+- Python unit tests: 376 passed. Harness tests (`npm run test:harness`): 90 passed. Alert rule tests
+  (`npm run test:alerts`): passed. Integration tests against a fresh endterm stack (`docker compose
+  down -v`, then `npm run up:endterm`): 11 passed. The command output, with the versions installed
+  on the host and in the gateway image, is in
+  [`security/post-upgrade-checks.log`](security/post-upgrade-checks.log).
+- One repetition of four endterm scenarios on the upgraded images. The outputs are kept apart from
+  the campaign, in `reports/endterm/post-upgrade/<scenario>__endterm__r0/metrics.json` (raw data in
+  `logs/endterm/post-upgrade/`), so that `RESULTS.md` and `results.csv` are unchanged:
+
+| Scenario | Acceptance (post-upgrade r0) | Request-based A, failed / total | Alerts | Campaign endterm r1–r3 (pre-upgrade) |
+|---|---|---|---|---|
+| `unauthorized-access` (E9) | 6/6 pass | 99.99 %, 1 / 11 995 | `AuthFailureSpike` fired, correct; 63 of 63 attacks denied | 6/6 in each run; 63 of 63 denied in each |
+| `abuse` (E10) | 6/6 pass | 100.00 %, 0 / 11 805 | `AuthFailureSpike` fired, correct; 203 malformed requests, 0 server errors (400: 2, 413: 1, 422: 200) | 6/6 in each run; the same malformed status counts in each |
+| `app-crash` (E1) | 3/3 pass | 99.97 %, 4 / 12 051 | none, correct | 3/3 in each run |
+| `db-failure` (E2) | 4/4 pass | 96.66 %, 266 / 7 973 | `DatabaseDown` fired; also `HighLatencyP95`, scored unexpected (§8.4) | 4/4 in each run; the same unexpected `HighLatencyP95` in each |
+
+  In all four runs no payment was lost, duplicated or left pending (`duplicateCharges = 0`,
+  `ackedNotCompleted = 0`). The 422 responses in E10 show that request validation still answers
+  with the same status codes under Starlette 1.x.
+
+**Scope of this evidence.** The 90-run campaign of §8 measured the **pre-upgrade** pins (PyJWT
+2.10.1, FastAPI 0.115.6, Starlette 0.41.3). The post-upgrade check above is one repetition of four
+scenarios in the endterm mode only. It is not a re-run of the campaign, and it supports only the
+claim that the upgrade did not break the security controls, the crash and database-failure handling
+or their acceptance criteria; it says nothing about the other six scenarios or the other two modes
+on the new pins.
+
+**Outside the control's scope.** `pip-audit -r requirements.txt` audits the application's
+dependencies, not the image's own tooling. Auditing the installed packages of the gateway image built
+here (`pip freeze`, then `pip-audit --no-deps`) found 6 advisories for `pip 25.0.1`, which comes from
+the `python:3.12-slim` base image ([`security/pip-audit-image-gateway.json`](security/pip-audit-image-gateway.json)).
+pip is not used by the services at run time; it is listed as a limitation (§9.2).
 
 ---
 
@@ -623,7 +677,7 @@ The full plan is [`TEST-PLAN.md`](TEST-PLAN.md). Summary:
 | Configuration | alert rules (promtool unit tests), Prometheus config, nginx configs, compose for all three modes | `config/prometheus/alerts.test.yml`, CI `config` job | `npm run test:alerts` |
 | Integration | the live endterm stack: login and own-record read, idempotent payment end to end, unauthorized payment denied with the DB unchanged, malformed payment 422 not 5xx, the correlation ID reaches the payment service's log, `app_rw` cannot truncate | `tests/integration/test_stack.py` | `npm run test:integration` (skips unless the stack reports `mode == "endterm"`) |
 | System / fault injection | ten scenarios with acceptance criteria, three repetitions per mode, three modes | `experiments/scenarios.ts`, `run.ts`, `campaign.ts` | `npm run campaign -- --reps 3` |
-| Dependencies | known vulnerabilities in the pinned Python dependencies | CI `deps` job | `pip-audit -r requirements.txt` |
+| Dependencies | known vulnerabilities in the pinned Python dependencies (none after the §5.4 upgrade) | CI `deps` job | `pip-audit -r requirements.txt` |
 
 The plan pins the riskiest behaviours with named tests (plan "Review Focus"): the staff quota must
 absorb the high-load peak (`test_staff_quota_absorbs_high_load_peak`), a payment without
@@ -1299,8 +1353,12 @@ Of the system (accepted residual risks, THREAT-MODEL.md §10):
 - no token revocation (tokens are short-lived instead), and one shared HS256 key;
 - the audit log is a local JSONL file and is not tamper-evident;
 - the PostgreSQL primary, nginx, `auth-1` and `transcript-1` are still single instances (§3.8);
-- 24 known vulnerabilities in the pinned PyJWT and Starlette versions are recorded but not fixed
-  (§5.4).
+- the campaign ran on PyJWT 2.10.1 and FastAPI 0.115.6 (Starlette 0.41.3), whose 24 known
+  vulnerabilities were found by `pip-audit` and fixed afterwards by upgrading to PyJWT 2.15.1,
+  FastAPI 0.162.2 and Starlette 1.10.0 (§5.4). The upgraded pins were checked with one repetition of
+  four endterm scenarios, not with a re-run of the 90-run campaign;
+- the `pip` 25.0.1 shipped in the `python:3.12-slim` base image has 6 known advisories, which
+  `pip-audit -r requirements.txt` does not cover (§5.4).
 
 Of the process:
 
@@ -1335,8 +1393,9 @@ Of the process:
 
 ### 9.4 Follow-up work
 
-In priority order: nest the timeouts (DB acquire < gateway attempt budget) and re-run E2; upgrade
-PyJWT and FastAPI/Starlette; filter window-close requests out of detection and recovery and add a
+In priority order: nest the timeouts (DB acquire < gateway attempt budget) and re-run E2; re-run
+the campaign on the upgraded PyJWT and FastAPI/Starlette pins (§5.4) and audit the built images, not
+only `requirements.txt`; filter window-close requests out of detection and recovery and add a
 during-fault p95; switch to an open-loop workload for E3 and E6 and raise E6 until something breaks;
 find the cause of the E4 baseline misrouting; share rate-limit state (or divide quotas by the number
 of gateways); add a second nginx and automatic database failover; push the branch so CI runs.
@@ -1447,7 +1506,9 @@ with the raw data that shows them, rather than tuned away after the fact.
 | `reports/endterm/runs/<scenario>__<mode>__r<n>/metrics.json` | computed metrics and acceptance per run | as above |
 | `reports/endterm/RESULTS.md`, `results.csv` | aggregated tables | committed (`5a02537`) |
 | `reports/endterm/figures/` | Grafana snapshots | committed (`3f8c9a9`) |
-| `reports/endterm/deps/` | `pip-audit` output (§5.4) | committed |
+| `reports/endterm/deps/` | first `pip-audit` output, pre-upgrade pins (§5.4) | committed |
+| `reports/endterm/security/` | `pip-audit` before and after the dependency upgrade and of the gateway image; test output after the upgrade (§5.4) | committed |
+| `reports/endterm/post-upgrade/<scenario>__endterm__r0/metrics.json`, `logs/endterm/post-upgrade/` | post-upgrade check: one repetition of four endterm scenarios on the upgraded pins; not part of the campaign or its aggregate (§5.4) | committed |
 | `logs/<scenario>__<mode>/`, `reports/runs/`, `reports/COMPARISON.md` | the midterm campaign (one run per scenario and mode) | committed at `midterm-final` |
 
 Midterm reference figures, for orientation only. They come from the midterm campaign, one run per
