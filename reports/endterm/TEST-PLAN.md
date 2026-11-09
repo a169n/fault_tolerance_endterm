@@ -23,7 +23,7 @@ chaos token) is gated by `ENDTERM_ENABLED`.
 | Level | What it checks | Where | Run with |
 |---|---|---|---|
 | Unit (Python) | Pure logic of each mechanism and security control, with upstreams stubbed or monkeypatched. No containers. | `tests/unit/**` (20 files) | `python3 -m pytest -q tests/unit` |
-| Unit (harness) | Pure logic of the experiment harness: metrics, acceptance evaluation, alert folding, the mode→`.env` builder, and the security attack/abuse generators and verdicts. No containers. | `experiments/*.test.ts` (5 files) | `npm run test:harness` |
+| Unit (harness) | Pure logic of the experiment harness: metrics, acceptance evaluation, alert folding, the mode→`.env` builder, and the security attack/abuse generators and verdicts. No containers. | `experiments/*.test.ts` (6 files) | `npm run test:harness` |
 | Config | The alert rules, Prometheus config and nginx configs are valid. | `config/prometheus/alerts.test.yml`, `promtool`, `nginx -t` | `npm run test:alerts` (+ Task 16 CI `config` job) |
 | Integration | The real endterm stack end to end: login, idempotent payment, authorization, validation, correlation-ID propagation, least privilege. Skips unless `GET /health` reports `mode == "endterm"`. | `tests/integration/test_stack.py` (Task 16) | `pytest -m integration -q` |
 | System / fault injection | The whole stack under 10 fault, monitoring and security scenarios, with acceptance criteria, 3 repetitions per mode. | `experiments/scenarios.ts`, `run.ts`, `campaign.ts` | `npm run exp <scenario> -- --rep N`, `npm run campaign -- --reps 3` |
@@ -187,10 +187,15 @@ baseline and midterm are expected to miss several and are reported for compariso
   - student `s7` creating student `evil-N`
   - student `s7` listing all students
 - **verify():** counts DB rows `where idempotency_key like 'attack-%'` (must be 0) and
-  `where id like 'evil-%'` (must be 0), and the audit deny events whose `rid` matches an attack rid.
+  `where id like 'evil-%'` (must be 0), the audit deny events whose `rid` matches an attack rid, the
+  status counts per attack category, and whether the s7 login succeeded (`logins`). A failed login is
+  recorded, not swallowed: the s7 attempts would then go out without a token and get a 401 before the
+  authorization policy runs, so the "every attempt denied" criterion also requires every s7-token
+  attempt (pay for s8, create `evil-N`, list all) to be a 403.
 - **Alerts:** mustFire — `AuthFailureSpike`; mayFire — .
-- **Acceptance (endterm):** every attempt denied (401/403); attacker-key payments in DB = 0; `evil-*`
-  students = 0; audit events ≥ attempts; ledger balanced; legitimate A ≥ 99.9 %.
+- **Acceptance (endterm):** every attempt denied (401/403), the s7-token ones by the policy (403);
+  attacker-key payments in DB = 0; `evil-*` students = 0; audit events ≥ attempts; ledger balanced;
+  legitimate A ≥ 99.9 %.
 - **Limitations:** 63 denials only just clear the `AuthFailureSpike` threshold (> 60 in 30 s,
   ALERTS.md); if the host is slow enough to spread them past one window the alert may be late. No
   token revocation exists (tokens are short-lived instead), so a stolen valid token is out of scope
@@ -207,12 +212,20 @@ baseline and midterm are expected to miss several and are reported for compariso
     path segment (all with the staff token: the body, not the policy, is what is wrong)
   - a burst of 1 000 `GET /api/students/s7` in ~2 s with the s7 student token
   - 50 logins with wrong passwords
-- **verify():** 5xx count among the malformed requests (must be 0); the burst summary (limited after
-  the quota, `Retry-After` on every 429, no 5xx, ≤ the 2-gateway cluster ceiling); the brute-force
-  status sequence (429 after the 5-attempt burst); and every instance answering `/health` afterwards.
+- **verify():** 5xx count and status counts among the malformed requests (no 5xx, and none refused
+  with 401/403/429 before validation, e.g. because the staff login failed); the burst summary (limited
+  after the quota, `Retry-After` on every 429, no 5xx, ≤ the 2-gateway cluster ceiling); the
+  brute-force status sequence (429 after the 5-attempt burst); the logins it depended on (`logins`);
+  and the instances: every one answering `/health` afterwards, and no container whose `docker
+  inspect` RestartCount or StartedAt changed (or that stopped) between a snapshot taken when the abuse
+  starts and one taken in verify(). The snapshot matters because endterm runs with
+  `RESTART_POLICY=unless-stopped`: a container that crashed under the abuse is restarted within
+  seconds, long before a `/health` probe could notice.
 - **Alerts:** mustFire — `AuthFailureSpike`; mayFire — `InstanceDown`.
-- **Acceptance (endterm):** 0 × 5xx caused by malformed input; burst gets 429 after the quota; brute
-  force gets 429 after 5; all instances stay up; ledger balanced; legitimate A ≥ 99.9 %.
+- **Acceptance (endterm):** 0 × 5xx caused by malformed input (and every malformed request reached
+  validation); burst gets 429 after the quota; brute force gets 429 after 5; all instances stay up (no
+  container restarted, stopped or disappeared; all healthy after); ledger balanced; legitimate
+  A ≥ 99.9 %.
 - **Limitations:** rate-limit state is per gateway, so the effective cluster quota is up to 2× a
   single gateway's; the burst verdict accounts for this. The burst is bounded by the host's ability
   to issue 1 000 requests in ~2 s.
@@ -228,6 +241,13 @@ each, and every acceptance array was populated and fully passed:
 | `error-spike` | `HighErrorRate` (correct) | 3/3 | A 90.70 %, detection ~11 s, no unexpected alert |
 | `unauthorized-access` | `AuthFailureSpike` (correct) | 6/6 | 63/63 denied (36×401, 27×403), 0 attack rows, 63 audit denies |
 | `abuse` | `AuthFailureSpike` (correct) | 6/6 | malformed 422×200/400×2/413×1 no 5xx; burst 938/1000 limited with Retry-After; brute force 10×401 then 40×429; instances up |
+
+After the review fix (category-aware E9 verdict, E10 validation-reached check and container restart
+snapshot), `unauthorized-access` and `abuse` were smoke-run once more with `--rep 0`: both 6/6 with
+`AuthFailureSpike` (correct). E9: 63/63 denied, every s7-token attempt 403 (9 per category), s7 login
+ok. E10: malformed 422×200/400×2/413×1, staff and s7 logins ok, 16 containers snapshotted, none
+restarted. A separate live check of the snapshot diff (`docker compose restart timetable-2` between
+two snapshots) reported exactly that container.
 
 `--rep 0` is a smoke run and is not part of the 3-repetition campaign (Task 17). The numbers above are
 single observations, kept for provenance alongside each run's `metrics.json`.

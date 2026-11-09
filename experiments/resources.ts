@@ -74,3 +74,57 @@ export async function sampleResources(signal: AbortSignal): Promise<ResSample[]>
   }
   return out;
 }
+
+// ---- container identity, for "no instance went down or was restarted" (E10) ----
+// A container restarted by its restart policy (unless-stopped) is back up by the time anything checks
+// /health, so a later health probe cannot tell. Its RestartCount or StartedAt can: snapshot both before
+// the fault and again after, and diff.
+
+export type ContainerState = { name: string; restartCount: number; startedAt: string; running: boolean };
+
+export const INSPECT_FORMAT = '{{.Name}} {{.RestartCount}} {{.State.StartedAt}} {{.State.Running}}';
+
+// `docker inspect -f INSPECT_FORMAT` output -> one state per line; unreadable lines are dropped.
+export function parseInspect(stdout: string): ContainerState[] {
+  const out: ContainerState[] = [];
+  for (const line of stdout.split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length !== 4) continue;
+    const [name, rc, startedAt, running] = parts;
+    const restartCount = Number(rc);
+    if (!name || !Number.isInteger(restartCount) || !startedAt || (running !== 'true' && running !== 'false')) continue;
+    out.push({ name: name.replace(/^\//, ''), restartCount, startedAt, running: running === 'true' });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// The containers that restarted, stopped or disappeared between two snapshots (sorted). A container
+// that was not running before (e.g. a finished one-shot job) only counts if it was started since.
+export function restartedBetween(before: ContainerState[], after: ContainerState[]): string[] {
+  const now = new Map(after.map((c) => [c.name, c]));
+  const changed: string[] = [];
+  for (const b of before) {
+    const a = now.get(b.name);
+    if (!a) {
+      changed.push(b.name);
+      continue;
+    }
+    if (a.restartCount !== b.restartCount || a.startedAt !== b.startedAt || (b.running && !a.running)) changed.push(b.name);
+  }
+  return changed.sort();
+}
+
+// Every container of this compose project, as `docker inspect` sees it now; null if docker cannot be
+// asked (missing evidence, so the criterion that reads it fails).
+export async function snapshotContainers(): Promise<ContainerState[] | null> {
+  try {
+    const { stdout: ids } = await exec('docker', ['compose', 'ps', '-a', '-q'], { cwd: ROOT, timeout: 10_000 });
+    const list = ids.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (list.length === 0) return null;
+    const { stdout } = await exec('docker', ['inspect', '-f', INSPECT_FORMAT, ...list], { timeout: 10_000 });
+    const states = parseInspect(stdout);
+    return states.length > 0 ? states : null;
+  } catch {
+    return null;
+  }
+}

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SCENARIOS } from './scenarios.ts';
 import { evaluate, type RunResult } from './acceptance.ts';
+import { restartedBetween, type ContainerState } from './resources.ts';
 
 // The scenario table of Task 15 (docs/superpowers/plans/2026-11-09-endterm-resilient-university.md).
 const TABLE: Record<string, { kind: string; mustFire: string[]; mayFire: string[]; criteria: number }> = {
@@ -31,14 +32,21 @@ function goodRun(over: Record<string, any> = {}): RunResult {
     consistency: { duplicateCharges: 0, lostRecords: 0, orphanedPending: 0, ledgerBalanced: true },
     alertCorrectness: { correct: true, missing: [], unexpected: [] },
     verify: {
-      attacks: { attempts: 80, denied: 80, statusCounts: { 401: 40, 403: 40 } },
+      attacks: {
+        attempts: 80, denied: 80, statusCounts: { 401: 40, 403: 40 },
+        byCategory: {
+          'no-token': { 401: 10 }, 'forged-signature': { 401: 10 }, 'expired-token': { 401: 10 }, 'alg-none': { 401: 10 },
+          'pay-for-other-student': { 403: 13 }, 'create-student': { 403: 13 }, 'list-all-students': { 403: 14 },
+        },
+      },
       attackPaymentsInDb: 0,
       evilStudents: 0,
       auditDenies: 80,
       malformed: { sent: 204, serverErrors: 0, statusCounts: { 422: 200, 400: 2, 413: 2 } },
       burst: { sent: 1000, ok: 60, limited: 940, limitedWithRetryAfter: 940, other: 0, firstLimitedAt: 60, elapsedMs: 2_000 },
       bruteForce: { statuses: [...Array(10).fill(401), ...Array(40).fill(429)], elapsedMs: 1_500 },
-      instances: { allUpAfter: true, restarted: [] },
+      instances: { allUpAfter: true, restarted: [], containersChecked: 16 },
+      logins: { s7: { ok: true }, staff: { ok: true } },
     },
   };
   for (const [k, v] of Object.entries(over)) base[k] = v === null || typeof v !== 'object' ? v : { ...base[k], ...v };
@@ -98,4 +106,50 @@ test('abuse: a 5xx caused by malformed input, an unlimited burst or a restarted 
     ['bruteforce-429-after-5']);
   assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: ['gateway-1'] } } })),
     ['instances-stay-up']);
+});
+
+test('unauthorized-access: a failed s7 login (privilege-escalation attempts sent without a token, 401) fails', () => {
+  // what verify() records when login as s7 fails: the three s7-token categories come back 401, not 403
+  const noLogin = goodRun({ verify: {
+    logins: { s7: { ok: false, error: 'login as s7 failed: HTTP 429' } },
+    attacks: { attempts: 80, denied: 80, statusCounts: { 401: 80 }, byCategory: {
+      'no-token': { 401: 10 }, 'forged-signature': { 401: 10 }, 'expired-token': { 401: 10 }, 'alg-none': { 401: 10 },
+      'pay-for-other-student': { 401: 13 }, 'create-student': { 401: 13 }, 'list-all-students': { 401: 14 },
+    } },
+  } });
+  assert.deepEqual(failedIds('unauthorized-access', noLogin), ['attacks-all-denied']);
+  // one category partly 401 is enough; and a run without the per-category evidence is not a pass
+  const partial = goodRun({ verify: { attacks: { attempts: 80, denied: 80, statusCounts: { 401: 41, 403: 39 }, byCategory: {
+    'no-token': { 401: 40 }, 'pay-for-other-student': { 403: 12, 401: 1 }, 'create-student': { 403: 13 }, 'list-all-students': { 403: 14 },
+  } } } });
+  assert.deepEqual(failedIds('unauthorized-access', partial), ['attacks-all-denied']);
+  assert.deepEqual(failedIds('unauthorized-access', goodRun({ verify: { attacks: { attempts: 80, denied: 80, statusCounts: { 401: 40, 403: 40 } } } })),
+    ['attacks-all-denied']);
+});
+
+test('abuse: malformed input refused at the auth layer (failed staff login) does not count as validated', () => {
+  const noLogin = goodRun({ verify: {
+    logins: { staff: { ok: false, error: 'login as bursar failed: HTTP 401' }, s7: { ok: true } },
+    malformed: { sent: 203, serverErrors: 0, statusCounts: { 401: 202, 413: 1 } },
+  } });
+  assert.deepEqual(failedIds('abuse', noLogin), ['malformed-input-no-5xx']);
+  for (const s of ['403', '429']) {
+    assert.deepEqual(failedIds('abuse', goodRun({ verify: { malformed: { sent: 203, serverErrors: 0, statusCounts: { 422: 200, [s]: 3 } } } })),
+      ['malformed-input-no-5xx'], s);
+  }
+});
+
+test('abuse: a container restarted during the abuse (back up by verify time) fails "instances stay up"', () => {
+  const at = '2026-11-09T17:00:00.000000000Z';
+  const before: ContainerState[] = ['gateway-1', 'gateway-2', 'student-1'].map((n) => ({ name: `ft-${n}-1`, restartCount: 0, startedAt: at, running: true }));
+  // restart policy brought gateway-1 back: running again, healthy, but RestartCount and StartedAt moved
+  const after = before.map((c) => c.name === 'ft-gateway-1-1' ? { ...c, restartCount: 1, startedAt: '2026-11-09T17:00:31.000000000Z' } : c);
+  const restarted = restartedBetween(before, after);
+  assert.deepEqual(restarted, ['ft-gateway-1-1']);
+  const run = goodRun({ verify: { instances: { allUpAfter: true, restarted, containersChecked: before.length } } });
+  assert.deepEqual(failedIds('abuse', run), ['instances-stay-up']);
+  // no snapshot (docker could not be asked) or an empty one is missing evidence, not a pass
+  assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: null, containersChecked: 0 } } })), ['instances-stay-up']);
+  assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: [], containersChecked: 0 } } })), ['instances-stay-up']);
+  assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: [] } } })), ['instances-stay-up']);
 });

@@ -47,15 +47,26 @@ export type Criterion = { id: string; describe: string; check: (m: RunResult) =>
 
 // The result of a security scenario's verify() (E9/E10), stored in metrics.json as RunResult.verify.
 export type SecurityVerify = {
-  attacks?: { attempts: number; denied: number; statusCounts: Record<string, number> };
+  // byCategory: status counts per attack category (attacks.ts ATTACK_CATEGORIES)
+  attacks?: { attempts: number; denied: number; statusCounts: Record<string, number>; byCategory?: Record<string, Record<string, number>> };
   attackPaymentsInDb?: number;   // rows in payments whose idempotency_key starts with attack-
   evilStudents?: number;         // students whose id starts with evil-
   auditDenies?: number;          // audit lines (outcome=deny) whose rid is one of the attack rids
   malformed?: { sent: number; serverErrors: number; statusCounts: Record<string, number> };
   burst?: BurstSummary;
   bruteForce?: BruteForce;
-  instances?: { allUpAfter: boolean; restarted: string[] };
+  // restarted: containers whose RestartCount/StartedAt changed (or that stopped) between the snapshot at
+  // inject and the one in verify(); null when a snapshot could not be taken
+  instances?: { allUpAfter: boolean; restarted: string[] | null; containersChecked?: number };
+  logins?: Record<string, { ok: boolean; error?: string }>;  // the logins the attack depended on
 };
+
+// The E9 categories sent with s7's real token: the policy must refuse them (403). A 401 there means the
+// token was missing (login failed) and the request never reached the authorization check under test.
+export const PRINCIPAL_ATTACK_CATEGORIES = ['pay-for-other-student', 'create-student', 'list-all-students'];
+// Statuses that mean a malformed request was refused before validation ran (no/invalid token, policy,
+// quota), so it says nothing about how the input is handled.
+const NOT_VALIDATED = ['401', '403', '429'];
 
 // `observed` is the names of the alerts that reached `firing` during the run.
 export function alertCorrectness(expected: ExpectedAlerts, observed: string[]): AlertCorrectness {
@@ -168,12 +179,19 @@ export const criteria = {
   // ---- E9 unauthorized-access ----
   allAttacksDenied: (): Criterion => ({
     id: 'attacks-all-denied',
-    describe: 'every attack attempt was denied (401/403), none got a 2xx',
+    describe: 'every attack attempt was denied (401/403), none got a 2xx; the s7-token attempts were refused by the policy (403), not for a missing token',
     check: (r) => {
       const a = sec(r).attacks;
       if (!a || !isNum(a.attempts) || a.attempts <= 0 || !isNum(a.denied)) return false;
       const good = Object.entries(a.statusCounts).every(([s, _c]) => Number(s) === 401 || Number(s) === 403);
-      return a.denied === a.attempts && good;
+      if (!(a.denied === a.attempts && good)) return false;
+      // category-aware: each privilege-escalation category was sent and every attempt got a 403
+      return PRINCIPAL_ATTACK_CATEGORIES.every((c) => {
+        const counts = a.byCategory?.[c];
+        if (!counts) return false;
+        const total = Object.values(counts).reduce((x, y) => x + y, 0);
+        return total > 0 && counts['403'] === total;
+      });
     },
   }),
   noAttackerPaymentsInDb: (): Criterion => ({
@@ -197,10 +215,11 @@ export const criteria = {
   // ---- E10 abuse ----
   malformedNo5xx: (): Criterion => ({
     id: 'malformed-input-no-5xx',
-    describe: 'no malformed request caused a 5xx',
+    describe: 'no malformed request caused a 5xx, and every one reached input validation (none refused with 401/403/429 first)',
     check: (r) => {
       const m = sec(r).malformed;
-      return m != null && isNum(m.sent) && m.sent > 0 && m.serverErrors === 0;
+      if (m == null || !isNum(m.sent) || m.sent <= 0 || m.serverErrors !== 0 || m.statusCounts == null) return false;
+      return NOT_VALIDATED.every((s) => !(m.statusCounts[s] > 0));
     },
   }),
   burstLimited: (): Criterion => ({
@@ -221,10 +240,11 @@ export const criteria = {
   }),
   instancesStayUp: (): Criterion => ({
     id: 'instances-stay-up',
-    describe: 'no instance went down or was restarted during the abuse',
+    describe: 'no instance went down or was restarted during the abuse (container RestartCount/StartedAt unchanged, every instance healthy after)',
     check: (r) => {
       const i = sec(r).instances;
-      return i != null && i.allUpAfter === true && Array.isArray(i.restarted) && i.restarted.length === 0;
+      return i != null && i.allUpAfter === true && Array.isArray(i.restarted) && i.restarted.length === 0
+        && isNum(i.containersChecked) && i.containersChecked > 0;
     },
   }),
 };

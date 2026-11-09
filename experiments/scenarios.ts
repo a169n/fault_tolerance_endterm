@@ -9,6 +9,7 @@ import {
   ATTACK_PREFIX, type SentResult,
 } from './attacks.ts';
 import { login } from './workload.ts';
+import { restartedBetween, snapshotContainers, type ContainerState } from './resources.ts';
 
 const exec = promisify(execFile);
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -117,6 +118,24 @@ const statusCounts = (rs: SentResult[]): Record<string, number> => {
   return c;
 };
 const denied = (rs: SentResult[]) => rs.filter((r) => r.status === 401 || r.status === 403).length;
+const byCategory = (rs: SentResult[]): Record<string, Record<string, number>> => {
+  const out: Record<string, SentResult[]> = {};
+  for (const r of rs) (out[r.category] ??= []).push(r);
+  return Object.fromEntries(Object.entries(out).map(([c, xs]) => [c, statusCounts(xs)]));
+};
+
+// A login the attack depends on. The error is kept, not swallowed: without the token the requests go
+// out unauthenticated and get a 401 before the control under test runs, so the run records it and
+// the category-aware criteria (acceptance.ts) fail on that evidence instead of passing for the wrong reason.
+export type LoginOutcome = { ok: boolean; error?: string };
+async function tryLogin(username: string, password: string): Promise<{ token?: string; outcome: LoginOutcome }> {
+  try {
+    return { token: await login(GATEWAY, username, password), outcome: { ok: true } };
+  } catch (e) {
+    console.error(`  ! login as ${username} failed: ${(e as Error).message}`);
+    return { outcome: { ok: false, error: (e as Error).message } };
+  }
+}
 
 // E9: tokens that must not work and a real student token used beyond its rights. The attacks run
 // during the legitimate workload (inject at 20 s); verify() checks the DB and the audit log after.
@@ -124,6 +143,7 @@ function unauthorizedAccess(): Scenario {
   let captured: SentResult[] = [];
   let auditOffset = 0;
   let rids = new Set<string>();
+  let logins: Record<string, LoginOutcome> = {};
   return {
     name: 'unauthorized-access',
     kind: 'security',
@@ -141,7 +161,9 @@ function unauthorizedAccess(): Scenario {
     inject: async () => {
       const env = dotEnv();
       auditOffset = existsSync(EVENTS_PATH) ? statSync(EVENTS_PATH).size : 0;
-      const s7Token = await login(GATEWAY, 's7', env.DEMO_PASSWORD ?? '').catch(() => undefined);
+      const s7 = await tryLogin('s7', env.DEMO_PASSWORD ?? '');
+      logins = { s7: s7.outcome };
+      const s7Token = s7.token;
       const set = attackSet({ tag: `e9-${Date.now()}`, s7Token, jwtSecret: env.JWT_SECRET, nowS: nowS() });
       rids = new Set(set.map((a) => a.rid));
       captured = await send(GATEWAY, set, 5_000, 30);  // paced: s7's own attacks stay under its quota
@@ -154,8 +176,8 @@ function unauthorizedAccess(): Scenario {
       await sleep(1_000);  // let the last audit lines flush to the shared log
       const auditDenies = auditDeniesSince(auditOffset, rids);
       return {
-        attacks: { attempts, denied: denied(captured), statusCounts: statusCounts(captured) },
-        attackPaymentsInDb, evilStudents, auditDenies,
+        attacks: { attempts, denied: denied(captured), statusCounts: statusCounts(captured), byCategory: byCategory(captured) },
+        attackPaymentsInDb, evilStudents, auditDenies, logins,
       };
     },
   };
@@ -169,6 +191,8 @@ function abuse(): Scenario {
   let burst: { results: SentResult[]; elapsedMs: number } = { results: [], elapsedMs: 0 };
   let brute: SentResult[] = [];
   let bruteElapsed = 0;
+  let logins: Record<string, LoginOutcome> = {};
+  let before: ContainerState[] | null = null;
   return {
     name: 'abuse',
     kind: 'security',
@@ -186,8 +210,12 @@ function abuse(): Scenario {
     inject: async () => {
       const env = dotEnv();
       const tag = `e10-${Date.now()}`;
-      const staffToken = await login(GATEWAY, 'bursar', env.DEMO_PASSWORD ?? '').catch(() => undefined);
-      const s7Token = await login(GATEWAY, 's7', env.DEMO_PASSWORD ?? '').catch(() => undefined);
+      before = await snapshotContainers();  // identity of every container before the abuse starts
+      const staff = await tryLogin('bursar', env.DEMO_PASSWORD ?? '');
+      const s7 = await tryLogin('s7', env.DEMO_PASSWORD ?? '');
+      logins = { staff: staff.outcome, s7: s7.outcome };
+      const staffToken = staff.token;
+      const s7Token = s7.token;
       malformed = await send(GATEWAY, abuseSet({ tag, staffToken }), 5_000, 5);  // 4xx expected, never 5xx
       burst = await sendBurst(GATEWAY, burstSet({ tag, token: s7Token }), 2_000);  // 1000 in ~2 s
       const started = Date.now();
@@ -197,26 +225,32 @@ function abuse(): Scenario {
     repair: async () => {},
     verify: async () => {
       const serverErrors = malformed.filter((r) => r.status >= 500 || r.status === 0).length;
-      const instances = await instancesUp();
+      const instances = await instancesUp(before);
       return {
         malformed: { sent: malformed.length, serverErrors, statusCounts: statusCounts(malformed) },
         burst: summarizeBurst(burst.results, burst.elapsedMs),
         bruteForce: { statuses: brute.map((r) => r.status), elapsedMs: bruteElapsed },
         instances,
+        logins,
       };
     },
   };
 }
 
-// Every application instance answers /health after the abuse (abuse must not take one down).
-async function instancesUp(): Promise<{ allUpAfter: boolean; restarted: string[] }> {
+// Every application instance answers /health after the abuse, and no container restarted, stopped or
+// disappeared between the snapshot taken when the abuse started and now (abuse must not take one down;
+// with RESTART_POLICY=unless-stopped a crashed one is back before /health is probed, hence the diff).
+// `restarted` is null when either snapshot could not be taken: missing evidence, not a pass.
+async function instancesUp(before: ContainerState[] | null): Promise<{ allUpAfter: boolean; restarted: string[] | null; containersChecked: number }> {
   const ports: Record<string, number> = {
     'gateway-1': 8081, 'gateway-2': 8082, 'student-1': 3011, 'student-2': 3012,
     'payment-1': 3021, 'payment-2': 3022, 'transcript-1': 3031, 'timetable-1': 3041, 'timetable-2': 3042, 'auth-1': 3051,
   };
   const checks = await Promise.all(Object.entries(ports).map(async ([name, p]) =>
     [name, await fetch(`http://localhost:${p}/health`, { signal: AbortSignal.timeout(2_000) }).then((r) => r.ok).catch(() => false)] as const));
-  return { allUpAfter: checks.every(([, ok]) => ok), restarted: [] };
+  const after = await snapshotContainers();
+  const restarted = before && after ? restartedBetween(before, after) : null;
+  return { allUpAfter: checks.every(([, ok]) => ok), restarted, containersChecked: before?.length ?? 0 };
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
