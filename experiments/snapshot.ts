@@ -14,8 +14,10 @@ export const DASHBOARD_UID = 'university';
 export const VIEWPORT = { width: 1600, height: 1000 };
 export const SCALE = 2;
 
-export function dashboardUrl(grafana: string, from: number, to: number): string {
-  return `${grafana.replace(/\/+$/, '')}/d/${DASHBOARD_UID}?from=${from}&to=${to}&kiosk`;
+// kiosk hides Grafana's menus for the PNG; the live demo (demo.ts) links without it, so the time
+// picker stays usable.
+export function dashboardUrl(grafana: string, from: number, to: number, kiosk = true): string {
+  return `${grafana.replace(/\/+$/, '')}/d/${DASHBOARD_UID}?from=${from}&to=${to}${kiosk ? '&kiosk' : ''}`;
 }
 
 export function timeWindow(run: { t0: number; t1: number }, padMs: number): { from: number; to: number } {
