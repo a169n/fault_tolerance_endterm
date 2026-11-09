@@ -66,7 +66,11 @@ const adminClaims = (iat: number, exp: number) =>
 
 // ---- E9: the attack set ----
 
-const payS8Body = JSON.stringify({ studentId: 's8', amount: 100 });
+// Every attacker payment uses this amount, which no legitimate traffic uses (the workload and the demo
+// pay 100). verify() counts payments by it, so an attacker payment is found even when the mode stores
+// a fresh UUID instead of the Idempotency-Key (baseline: idempotency.payment_key ignores the header).
+export const ATTACK_AMOUNT = 13.37;
+const payS8Body = JSON.stringify({ studentId: 's8', amount: ATTACK_AMOUNT });
 const evilBody = (n: number) => JSON.stringify({ id: `evil-${n}`, name: 'Mallory' });
 
 export type AttackOpts = {
@@ -128,9 +132,12 @@ export function attackSet(opts: AttackOpts): HttpReq[] {
 
 // ---- E10: the abuse sets ----
 
-// The Task 10 rejection list, expanded to 200 bodies. Each is a JSON string the gateway/service must
-// answer with a 4xx (422/400/413), never a 5xx. `amount: 1e9` overflows NUMERIC(10,2) in baseline.
-const REJECTION_SEEDS: string[] = [
+// The Task 10 rejection list. Each is a JSON string the gateway/service must answer with a 4xx
+// (422/400/413), never a 5xx. `amount: 1e9` overflows NUMERIC(10,2) in baseline. Each seed is invalid
+// for exactly the reason its line names: only the two seeds about extra fields carry a field beyond
+// studentId/amount, so a missing bound (e.g. `le=10_000`) shows up as a non-4xx for its own seed.
+export const EXTRA_FIELD_SEEDS = 2;  // the `admin` and `note` seeds below
+export const REJECTION_SEEDS: string[] = [
   JSON.stringify({ studentId: 's7', amount: -1 }),
   JSON.stringify({ studentId: 's7', amount: 0 }),
   JSON.stringify({ studentId: 's7', amount: 10000.01 }),
@@ -153,13 +160,11 @@ const REJECTION_SEEDS: string[] = [
   JSON.stringify({ studentId: 's7', amount: { $gt: 0 } }),        // object where a number is required
 ];
 
-// Build exactly 200 distinct malformed bodies by tagging each seed with a harmless extra marker field
-// value is not what makes them invalid (the seed already is); it only keeps all 200 distinct.
-export const MALFORMED_PAYMENT_BODIES: string[] = Array.from({ length: 200 }, (_, i) => {
-  const seed = JSON.parse(REJECTION_SEEDS[i % REJECTION_SEEDS.length]);
-  seed.__n = i;  // an unexpected field (extra='forbid' already rejects it); keeps the 200 distinct
-  return JSON.stringify(seed);
-});
+// 200 sends cycling over the seeds, each body exactly as written above (10 sends per seed). The
+// bodies repeat on purpose: nothing is added to make them distinct (an extra field would make every
+// body a 422 for that field alone and hide the seed under test); the per-request Idempotency-Key and
+// x-request-id already make each request distinct.
+export const MALFORMED_PAYMENT_BODIES: string[] = Array.from({ length: 200 }, (_, i) => REJECTION_SEEDS[i % REJECTION_SEEDS.length]);
 
 export const INVALID_JSON = '{"studentId": "s7", "amount": 100';   // truncated: not parseable
 export const BAD_PATH_SEGMENT = '/api/students/..%2f..%2fetc';     // a path segment outside [A-Za-z0-9._-]{1,64}
@@ -216,7 +221,7 @@ export type BurstSummary = {
   limited: number;              // 429
   limitedWithRetryAfter: number;
   other: number;                // anything else, incl. 5xx and transport errors
-  firstLimitedAt: number | null;
+  firstLimitedAt: number | null;  // informational only: the waves are concurrent, so this is not processing order
   elapsedMs: number;
 };
 
@@ -236,14 +241,18 @@ export function summarizeBurst(results: SentResult[], elapsedMs: number): BurstS
 }
 
 // The burst must: be limited at all; show Retry-After on every 429; produce no non-429 non-2xx
-// (no 5xx); and let through no more than the cluster can admit (GATEWAYS x (burst + rate x window)).
+// (no 5xx); admit at least one gateway's burst (a limiter that refuses earlier is over-eager); and let
+// through no more than the cluster can admit (GATEWAYS x (burst + rate x window)). The checks are on
+// counts only: sendBurst sends concurrent waves of 50, so the position of a 429 among results sorted
+// by send time says nothing about when a gateway processed it (two gateways each limit part of the
+// first wave, and those 429s land anywhere in it).
 export function burstVerdict(s: BurstSummary): boolean {
   if (s.limited === 0) return false;
   if (s.other > 0) return false;
   if (s.limited !== s.limitedWithRetryAfter) return false;
+  if (s.ok < QUOTAS.student.burst) return false;  // not even one gateway's burst admitted
   const windowS = s.elapsedMs / 1000;
   const clusterCeiling = GATEWAYS * (QUOTAS.student.burst + QUOTAS.student.ratePerS * windowS);
-  if (s.firstLimitedAt !== null && s.firstLimitedAt < QUOTAS.student.burst) return false;  // limited before one gateway's burst
   return s.ok <= clusterCeiling + GATEWAYS;  // small slack for timing of the refill
 }
 

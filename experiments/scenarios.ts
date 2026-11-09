@@ -6,7 +6,7 @@ import { chaosHeaders as headersFor, parseEnv } from './env.ts';
 import { criteria, type Criterion, type ExpectedAlerts } from './acceptance.ts';
 import {
   abuseSet, attackSet, bruteForceSet, burstSet, send, sendBurst, summarizeBurst,
-  ATTACK_PREFIX, type SentResult,
+  ATTACK_AMOUNT, ATTACK_PREFIX, type SentResult,
 } from './attacks.ts';
 import { login } from './workload.ts';
 import { restartedBetween, snapshotContainers, type ContainerState } from './resources.ts';
@@ -137,6 +137,14 @@ async function tryLogin(username: string, password: string): Promise<{ token?: s
   }
 }
 
+// Attacker payments in the DB, by the attack's distinctive amount (attacks.ts ATTACK_AMOUNT, which no
+// legitimate request uses) OR its attack- key. The amount is what makes it mode-independent: baseline
+// stores a fresh UUID instead of the Idempotency-Key (idempotency.payment_key), so a key-only count
+// would read 0 there even when forged/expired/no-token payments succeeded. The DB is truncated before
+// every run (run.ts), so only this run's rows are counted. Any state counts: a pending row reached the DB too.
+export const ATTACK_PAYMENTS_SQL =
+  `select count(*) from payments where amount = ${ATTACK_AMOUNT} or idempotency_key like '${ATTACK_PREFIX}%'`;
+
 // E9: tokens that must not work and a real student token used beyond its rights. The attacks run
 // during the legitimate workload (inject at 20 s); verify() checks the DB and the audit log after.
 function unauthorizedAccess(): Scenario {
@@ -171,7 +179,7 @@ function unauthorizedAccess(): Scenario {
     repair: async () => {},  // nothing to repair: the attacks leave no state behind if the controls hold
     verify: async () => {
       const attempts = captured.length;
-      const attackPaymentsInDb = num(await psql(`select count(*) from payments where idempotency_key like '${ATTACK_PREFIX}%'`));
+      const attackPaymentsInDb = num(await psql(ATTACK_PAYMENTS_SQL));
       const evilStudents = num(await psql("select count(*) from students where id like 'evil-%'"));
       await sleep(1_000);  // let the last audit lines flush to the shared log
       const auditDenies = auditDeniesSince(auditOffset, rids);

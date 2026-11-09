@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SCENARIOS } from './scenarios.ts';
+import { ATTACK_PAYMENTS_SQL, SCENARIOS } from './scenarios.ts';
+import { ATTACK_AMOUNT } from './attacks.ts';
 import { evaluate, type RunResult } from './acceptance.ts';
 import { restartedBetween, type ContainerState } from './resources.ts';
 
@@ -152,4 +153,18 @@ test('abuse: a container restarted during the abuse (back up by verify time) fai
   assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: null, containersChecked: 0 } } })), ['instances-stay-up']);
   assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: [], containersChecked: 0 } } })), ['instances-stay-up']);
   assert.deepEqual(failedIds('abuse', goodRun({ verify: { instances: { allUpAfter: true, restarted: [] } } })), ['instances-stay-up']);
+});
+
+test('unauthorized-access: attacker payments are counted by amount, so a baseline that drops the Idempotency-Key is still caught', () => {
+  // Baseline stores a fresh UUID instead of the client's key (idempotency.payment_key), so an
+  // attack- key filter alone would read 0 even when the forged/expired/no-token payments succeeded.
+  assert.match(ATTACK_PAYMENTS_SQL, new RegExp(`\\bamount = ${ATTACK_AMOUNT.toString().replace('.', '\\.')}\\b`));
+  assert.match(ATTACK_PAYMENTS_SQL, / or idempotency_key like 'attack-%'/);
+  assert.doesNotMatch(ATTACK_PAYMENTS_SQL, /state\s*=/);  // a pending attacker row counts too
+  // what verify() records in that baseline case fails the criterion
+  assert.deepEqual(failedIds('unauthorized-access', goodRun({ verify: {
+    attacks: { attempts: 63, denied: 0, statusCounts: { 201: 63 } }, attackPaymentsInDb: 36,
+  } })).filter((id) => id === 'attacker-payments-in-db-eq-0'), ['attacker-payments-in-db-eq-0']);
+  // and a missing count is not a pass
+  assert.ok(failedIds('unauthorized-access', goodRun({ verify: { attackPaymentsInDb: null as any } })).includes('attacker-payments-in-db-eq-0'));
 });

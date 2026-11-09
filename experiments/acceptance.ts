@@ -49,7 +49,7 @@ export type Criterion = { id: string; describe: string; check: (m: RunResult) =>
 export type SecurityVerify = {
   // byCategory: status counts per attack category (attacks.ts ATTACK_CATEGORIES)
   attacks?: { attempts: number; denied: number; statusCounts: Record<string, number>; byCategory?: Record<string, Record<string, number>> };
-  attackPaymentsInDb?: number;   // rows in payments whose idempotency_key starts with attack-
+  attackPaymentsInDb?: number;   // payments rows with the attack amount or an attack- key (scenarios.ts ATTACK_PAYMENTS_SQL)
   evilStudents?: number;         // students whose id starts with evil-
   auditDenies?: number;          // audit lines (outcome=deny) whose rid is one of the attack rids
   malformed?: { sent: number; serverErrors: number; statusCounts: Record<string, number> };
@@ -196,7 +196,7 @@ export const criteria = {
   }),
   noAttackerPaymentsInDb: (): Criterion => ({
     id: 'attacker-payments-in-db-eq-0',
-    describe: 'no payment with an attack- idempotency key reached the database',
+    describe: 'no attacker payment (attack amount or attack- idempotency key) reached the database',
     check: (r) => sec(r).attackPaymentsInDb === 0,
   }),
   noEvilStudents: (): Criterion => ({

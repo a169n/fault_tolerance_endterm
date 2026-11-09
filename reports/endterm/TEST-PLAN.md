@@ -186,7 +186,8 @@ baseline and midterm are expected to miss several and are reported for compariso
   - student `s7` paying for `s8`
   - student `s7` creating student `evil-N`
   - student `s7` listing all students
-- **verify():** counts DB rows `where idempotency_key like 'attack-%'` (must be 0) and
+- **verify():** counts DB payment rows with the attack amount 13.37 (no legitimate request uses it;
+  the workload and the demo pay 100) or an `attack-` key (must be 0), and student rows
   `where id like 'evil-%'` (must be 0), the audit deny events whose `rid` matches an attack rid, the
   status counts per attack category, and whether the s7 login succeeded (`logins`). A failed login is
   recorded, not swallowed: the s7 attempts would then go out without a token and get a 401 before the
@@ -194,7 +195,7 @@ baseline and midterm are expected to miss several and are reported for compariso
   attempt (pay for s8, create `evil-N`, list all) to be a 403.
 - **Alerts:** mustFire — `AuthFailureSpike`; mayFire — .
 - **Acceptance (endterm):** every attempt denied (401/403), the s7-token ones by the policy (403);
-  attacker-key payments in DB = 0; `evil-*` students = 0; audit events ≥ attempts; ledger balanced;
+  attacker payments in DB = 0; `evil-*` students = 0; audit events ≥ attempts; ledger balanced;
   legitimate A ≥ 99.9 %.
 - **Limitations:** 63 denials only just clear the `AuthFailureSpike` threshold (> 60 in 30 s,
   ALERTS.md); if the host is slow enough to spread them past one window the alert may be late. No
@@ -208,13 +209,17 @@ baseline and midterm are expected to miss several and are reported for compariso
   workload stays available.
 - **Inject:** during the workload, the abuse script below. **Repair:** none.
 - **Abuse script (`experiments/attacks.ts` `abuseSet` / `burstSet` / `bruteForceSet`):**
-  - 200 malformed payments from the Task 10 rejection list, plus invalid JSON, a 1 MiB body and a bad
-    path segment (all with the staff token: the body, not the policy, is what is wrong)
+  - 200 malformed payments: the 20 seeds of the Task 10 rejection list, 10 sends each, every body
+    exactly as written (only the two extra-field seeds carry a field beyond `studentId`/`amount`, so
+    each seed is rejected for its own reason), plus invalid JSON, a 1 MiB body and a bad path segment
+    (all with the staff token: the body, not the policy, is what is wrong)
   - a burst of 1 000 `GET /api/students/s7` in ~2 s with the s7 student token
   - 50 logins with wrong passwords
 - **verify():** 5xx count and status counts among the malformed requests (no 5xx, and none refused
-  with 401/403/429 before validation, e.g. because the staff login failed); the burst summary (limited
-  after the quota, `Retry-After` on every 429, no 5xx, ≤ the 2-gateway cluster ceiling); the
+  with 401/403/429 before validation, e.g. because the staff login failed); the burst summary (some
+  429s, `Retry-After` on every 429, no 5xx, at least one gateway's burst of 20 admitted and ≤ the
+  2-gateway cluster ceiling; counts only, because the burst is sent in concurrent waves of 50 and a
+  429's position in send order is not the order the gateways processed it); the
   brute-force status sequence (429 after the 5-attempt burst); the logins it depended on (`logins`);
   and the instances: every one answering `/health` afterwards, and no container whose `docker
   inspect` RestartCount or StartedAt changed (or that stopped) between a snapshot taken when the abuse
@@ -248,6 +253,17 @@ snapshot), `unauthorized-access` and `abuse` were smoke-run once more with `--re
 ok. E10: malformed 422×200/400×2/413×1, staff and s7 logins ok, 16 containers snapshotted, none
 restarted. A separate live check of the snapshot diff (`docker compose restart timetable-2` between
 two snapshots) reported exactly that container.
+
+After the second review fix (count-only burst verdict, malformed seeds sent exactly as written,
+attacker payments counted by the attack amount 13.37), both were smoke-run once more on endterm with
+`--rep 0`: `abuse` 6/6 (malformed 422×200/400×2/413×1, no 5xx; burst 60 ok / 940 limited with
+Retry-After in 1 138 ms, first 429 at send index 31; brute force 10×401 then 40×429; 16 containers,
+none restarted) and `unauthorized-access` 6/6 (63/63 denied, 36×401 / 27×403, 0 attacker payments,
+0 `evil-*`, 63 audit denies), both with `AuthFailureSpike` (correct). A one-off baseline smoke run of
+`unauthorized-access` (stack brought up with `npm run up:baseline`, then back to endterm; output not
+kept) confirmed the new count: 41 attacker payments in the DB (every payment attempt of no-token,
+forged, expired, `alg:none` and s7-for-s8 succeeded), none of them with an `attack-` key, so the old
+key-only count would have read 0; `attacker-payments-in-db-eq-0` failed as it should (2/6).
 
 `--rep 0` is a smoke run and is not part of the 3-repetition campaign (Task 17). The numbers above are
 single observations, kept for provenance alongside each run's `metrics.json`.
