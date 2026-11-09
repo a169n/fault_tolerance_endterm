@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { buildEnv, formatEnv, isMode, parseEnv } from './env.ts';
+import { isMode } from './env.ts';
+import { writeEnvFile } from './env-file.ts';
 
 const arg = process.argv[2] === 'ft' ? 'midterm' : process.argv[2];  // up:ft is the midterm name
 if (!arg || !isMode(arg)) {
@@ -8,10 +8,7 @@ if (!arg || !isMode(arg)) {
   process.exit(1);
 }
 
-const envFile = new URL('../.env', import.meta.url);
-const existing = existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')) : {};
-writeFileSync(envFile, formatEnv(buildEnv(arg, existing)), { mode: 0o600 });  // compose reads mode + secrets from .env
-try { chmodSync(envFile, 0o600); } catch { /* not supported on every filesystem (Windows) */ }
+writeEnvFile(arg);  // compose reads mode + secrets from .env
 console.log(`mode: ${arg}`);
 const r = spawnSync('docker', ['compose', 'up', '-d', '--build', '--remove-orphans'], { stdio: 'inherit', cwd: new URL('..', import.meta.url) });
 process.exit(r.status ?? 1);
