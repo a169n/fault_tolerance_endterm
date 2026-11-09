@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse
 from .. import fault_injection
 from ..core import metrics
 from ..core.db import close_pools, db_healthy, open_pools, read, read_primary, to_jsonable, transaction
-from ..core.eventlog import ft_enabled, log
+from ..core.eventlog import endterm_enabled, ft_enabled, log
 from ..core.service import create_app
 from ..fault_tolerance.software import checkpoint_rollback, idempotency
+from ..security import validation
 
 STALE_PENDING_REFRESH_S = 5
 STALE_PENDING_SQL = (  # a pending row this old was lost or interrupted mid-payment (PaymentsStuckPending)
@@ -59,15 +60,22 @@ async def health():
 @app.post("/")
 async def create_payment(body: dict, request: Request):
     await fault_injection.chaos_gate()
-    try:
-        amount = float(body.get("amount", 0))
-    except (TypeError, ValueError):
-        amount = 0
-    if not body.get("studentId") or amount <= 0:
-        return JSONResponse(status_code=400, content={"error": "studentId and a positive amount are required"})
+    if endterm_enabled():  # strict: a closed model, before any database work
+        payment = validation.parse(validation.PaymentIn, body)
+        if isinstance(payment, JSONResponse):
+            return payment
+        student_id, amount = payment.studentId, payment.amount
+    else:  # baseline and midterm: the lenient midterm check, unchanged
+        try:
+            amount = float(body.get("amount", 0))
+        except (TypeError, ValueError):
+            amount = 0
+        if not body.get("studentId") or amount <= 0:
+            return JSONResponse(status_code=400, content={"error": "studentId and a positive amount are required"})
+        student_id = body["studentId"]
 
     key = idempotency.payment_key(request.headers)                                      # 1. S5
-    payment_id = await checkpoint_rollback.write_checkpoint(key, body["studentId"], amount)  # 2. S6
+    payment_id = await checkpoint_rollback.write_checkpoint(key, student_id, amount)    # 2. S6
     if payment_id is None:
         return await idempotency.original_response(key)                                 # duplicate: S5
 
@@ -77,11 +85,11 @@ async def create_payment(body: dict, request: Request):
 
     try:
         async with transaction() as cur:  # 3. atomic charge
-            await cur.execute("SELECT balance FROM students WHERE id = %s FOR UPDATE", (body["studentId"],))
+            await cur.execute("SELECT balance FROM students WHERE id = %s FOR UPDATE", (student_id,))
             if await cur.fetchone() is None:
                 return JSONResponse(status_code=404, content={"error": "student not found"})
             await cur.execute(
-                "UPDATE students SET balance = balance + %s WHERE id = %s", (amount, body["studentId"])
+                "UPDATE students SET balance = balance + %s WHERE id = %s", (amount, student_id)
             )
             await cur.execute(
                 "UPDATE payments SET state = 'completed', updated_at = now() WHERE id = %s RETURNING *",

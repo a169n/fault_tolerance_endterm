@@ -104,8 +104,11 @@ def test_client_caused_login_failures_do_not_open_the_auth_breaker(
     client = _client()
     for _ in range(rounds):
         for raw in hostile:
-            assert client.post("/auth/token", content=raw).status_code in (400, 401)
-    assert len(seen) == rounds * len(hostile)  # one upstream attempt each: 4xx is never retried
+            assert client.post("/auth/token", content=raw).status_code in (400, 401, 413)
+    # In endterm the gateway's request limits (Task 10) stop the oversized and non-JSON bodies at the
+    # edge; only the valid-JSON one is relayed. Either way: one upstream attempt each, 4xx is never retried.
+    relayed = 1 if mode == "endterm" else len(hostile)
+    assert len(seen) == rounds * relayed
     assert circuit_breaker.for_pool("auth").state() == "closed"
     assert not outlier_ejection.for_pool("auth").is_ejected("http://auth-1:3000")
     ok = client.post("/auth/token", json=CREDS)

@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse
 
 from .. import fault_injection
 from ..core.db import close_pools, db_healthy, open_pools, read, to_jsonable, write
-from ..core.eventlog import SERVICE, ft_enabled, log
+from ..core.eventlog import SERVICE, endterm_enabled, ft_enabled, log
 from ..core.service import create_app
 from ..fault_tolerance.software import job_checkpoint
+from ..security import validation
 from .schedule import Placements, steps
 
 STEP_MS = int(os.environ.get("TIMETABLE_STEP_MS", 50))
@@ -64,9 +65,15 @@ async def health():
 @app.post("/")
 async def create_job(body: dict):
     await fault_injection.chaos_gate()
-    term = str(body.get("term") or "").strip()
-    if not term:
-        return JSONResponse(status_code=400, content={"error": "term is required"})
+    if endterm_enabled():  # strict: a closed model, before any database work
+        job = validation.parse(validation.TimetableJobIn, body)
+        if isinstance(job, JSONResponse):
+            return job
+        term = job.term
+    else:  # baseline and midterm: the lenient midterm check, unchanged
+        term = str(body.get("term") or "").strip()
+        if not term:
+            return JSONResponse(status_code=400, content={"error": "term is required"})
     rows = await write(
         """INSERT INTO timetable_jobs (term, owner) VALUES (%s, %s)
            ON CONFLICT (term) DO NOTHING

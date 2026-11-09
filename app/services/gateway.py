@@ -8,8 +8,9 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 import httpx
-from fastapi import Body, FastAPI, Header, Request
+from fastapi import APIRouter, Body, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 
 from ..core.context import HEADER as REQUEST_ID_HEADER
 from ..core.context import REQUEST_ID, new_request_id
@@ -20,7 +21,7 @@ from ..fault_tolerance.infrastructure import load_balancer
 from ..fault_tolerance.software import circuit_breaker, health_check, idempotency, outlier_ejection
 from ..fault_tolerance.software.degradation import StaleCache
 from ..fault_tolerance.software.retry import call
-from ..security import audit, policy, tokens
+from ..security import audit, policy, tokens, validation
 from ..security.tokens import Principal
 
 
@@ -73,23 +74,51 @@ class Pool(str, Enum):
 BODY = Body(None, examples=[{"studentId": "s7", "amount": 100}, {"term": "2026-fall"}])
 
 
-@app.get("/api/{pool}")
+class _EdgeLimits(APIRoute):
+    """Endterm request limits (size, JSON, path segments) for /api/* and /auth/token.
+
+    They run inside the app's middleware (so rejections get a request ID, a log line and a metric)
+    but before FastAPI parses the body and before authentication: the cheapest checks come first,
+    and nothing later (the policy's ownership check, the proxy) ever reads an oversized body.
+    """
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+        is_login = self.path == "/auth/token"
+
+        async def limited(request: Request):
+            if endterm_enabled():
+                rejected = await validation.gateway_limits(
+                    request, request.path_params.get("path", ""),
+                    target="auth" if is_login else str(request.path_params.get("pool", "")),
+                    check_content_type=not is_login)
+                if rejected is not None:
+                    return rejected
+            return await handler(request)
+
+        return limited
+
+
+api = APIRouter(route_class=_EdgeLimits)
+
+
+@api.get("/api/{pool}")
 async def get_all(pool: Pool, request: Request):
     return await proxy(pool.value, request, "")
 
 
-@app.get("/api/{pool}/{path:path}")
+@api.get("/api/{pool}/{path:path}")
 async def get_one(pool: Pool, path: str, request: Request):
     return await proxy(pool.value, request, path)
 
 
-@app.post("/api/{pool}")
+@api.post("/api/{pool}")
 async def create(pool: Pool, request: Request, body: Optional[dict] = BODY,
                  idempotency_key: Optional[str] = Header(None)):
     return await proxy(pool.value, request, "")
 
 
-@app.post("/api/{pool}/{path:path}")
+@api.post("/api/{pool}/{path:path}")
 async def create_at(pool: Pool, path: str, request: Request, body: Optional[dict] = BODY,
                     idempotency_key: Optional[str] = Header(None)):
     return await proxy(pool.value, request, path)
@@ -100,12 +129,15 @@ _LOGIN_DOC = {"requestBody": {"content": {"application/json": {"schema": {
     "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}}}}}
 
 
-@app.post("/auth/token", openapi_extra=_LOGIN_DOC)
+@api.post("/auth/token", openapi_extra=_LOGIN_DOC)
 async def login(request: Request):
     # The raw body is relayed whatever its content type (`curl -d` sends a form type); the auth
     # service parses it. Same retry/breaker path as the API pools. Tokens are verified here at the
     # gateway (Task 9), so an auth-1 outage blocks only new logins, not existing sessions.
     return await proxy("auth", request, "token", public=True)
+
+
+app.include_router(api)  # after the routes above: include_router copies them
 
 
 def _ejection_outcome(outliers: Optional[outlier_ejection.OutlierDetector]):

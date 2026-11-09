@@ -4,8 +4,9 @@ from fastapi.responses import JSONResponse
 
 from .. import fault_injection
 from ..core.db import db_healthy, read, to_jsonable, write
-from ..core.eventlog import ft_enabled
+from ..core.eventlog import endterm_enabled, ft_enabled
 from ..core.service import create_app
+from ..security import validation
 
 app = create_app()
 app.include_router(fault_injection.router)
@@ -28,13 +29,20 @@ async def list_students():
 @app.post("/")
 async def create_student(body: dict):
     await fault_injection.chaos_gate()
-    if not body.get("id") or not body.get("name"):
-        return JSONResponse(status_code=400, content={"error": "id and name are required"})
+    if endterm_enabled():  # strict: a closed model, before any database work
+        student = validation.parse(validation.StudentIn, body)
+        if isinstance(student, JSONResponse):
+            return student
+        params = (student.id, student.name, student.credits)
+    else:  # baseline and midterm: the lenient midterm check, unchanged
+        if not body.get("id") or not body.get("name"):
+            return JSONResponse(status_code=400, content={"error": "id and name are required"})
+        params = (body["id"], body["name"], body.get("credits", 0))
     rows = await write(
         """INSERT INTO students (id, name, credits) VALUES (%s, %s, %s)
            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
            RETURNING id, name, credits, balance""",
-        (body["id"], body["name"], body.get("credits", 0)),
+        params,
     )
     return JSONResponse(status_code=201, content=to_jsonable(rows[0]))
 
