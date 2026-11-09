@@ -49,7 +49,8 @@ async def lifespan(app: FastAPI):
 app = create_app(with_db=False, lifespan=lifespan)
 
 
-@app.get("/health")
+@app.get("/health/ready")
+@app.get("/health")  # alias of /health/ready: the harness reads the mode from here
 async def health():
     return {"ok": True, "ft": ft_enabled(), "endterm": endterm_enabled(), "mode": mode(),
             "instances": health_check.snapshot()}

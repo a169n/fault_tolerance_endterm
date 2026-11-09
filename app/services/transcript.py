@@ -14,7 +14,8 @@ app.include_router(fault_injection.router)
 _cache = StaleCache()
 
 
-@app.get("/health")
+@app.get("/health/ready")
+@app.get("/health")  # alias of /health/ready: the midterm harness probes /health
 async def health():
     ok = await db_healthy()
     healthy = ok or ft_enabled()  # FT: the cache can still answer

@@ -8,8 +8,15 @@ x-service: &service
     LOG_DIR: /logs
     DATABASE_URL: postgresql://postgres:postgres@postgres-primary:5432/university
     DATABASE_REPLICA_URL: postgresql://postgres:postgres@postgres-replica:5432/university
+    PORT: 3000                              # uvicorn port, read by the healthcheck (gateway: 8080)
   volumes:
     - ./logs:/logs                          # every service appends to logs/events.jsonl
+  healthcheck:                              # liveness only: a DB outage must not mark app containers unhealthy
+    test: ["CMD", "python", "-c", "import os,urllib.request;urllib.request.urlopen(f'http://localhost:{os.environ[\"PORT\"]}/health/live',timeout=1)"]
+    interval: 2s
+    timeout: 2s
+    retries: 3
+    start_period: 5s
   depends_on:
     postgres-primary:
       condition: service_healthy

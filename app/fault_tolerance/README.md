@@ -12,7 +12,7 @@ nothing that uses them.
 | S1  | Retry + exponential backoff + jitter | `[software/retry.py](software/retry.py)`                             | a failed call is repeated on the next replica, waiting 50·2ⁿ ms × random |
 | S2  | Timeouts                             | `[software/timeouts.py](software/timeouts.py)`                       | every wait in the system is bounded; all deadlines in one file           |
 | S3  | Circuit breaker                      | `[software/circuit_breaker.py](software/circuit_breaker.py)`         | 5 failures in a row → stop calling that service for 5 s                  |
-| S4  | Health checks                        | `[software/health_check.py](software/health_check.py)`               | gateway polls `/health` every 1 s, dead replicas leave rotation          |
+| S4  | Health checks                        | `[software/health_check.py](software/health_check.py)`               | gateway polls `/health/ready` every 1 s, dead replicas leave rotation    |
 | S5  | Idempotency + duplicate detection    | `[software/idempotency.py](software/idempotency.py)`                 | same Idempotency-Key twice → original result, no second charge           |
 | S6  | Checkpoint + rollback / recovery     | `[software/checkpoint_rollback.py](software/checkpoint_rollback.py)` | `pending` row before the charge; a sweep rolls back what a crash left    |
 | S7  | Graceful degradation                 | `[software/degradation.py](software/degradation.py)`                 | everything failed on a read → recent stale data, HTTP 203 `degraded`     |

@@ -49,7 +49,8 @@ app = create_app(lifespan=lifespan)
 app.include_router(fault_injection.router)
 
 
-@app.get("/health")
+@app.get("/health/ready")
+@app.get("/health")  # alias of /health/ready: the midterm harness probes /health
 async def health():
     ok = await db_healthy()
     return JSONResponse(status_code=200 if ok else 503, content={"ok": ok, "ft": ft_enabled()})

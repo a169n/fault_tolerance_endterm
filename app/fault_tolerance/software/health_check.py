@@ -28,7 +28,7 @@ def snapshot() -> Dict[str, bool]:
 async def _probe(client: httpx.AsyncClient, instance: str) -> None:
     rid = f"health-{new_request_id()}"  # probe traffic is tellable apart from user requests in the logs
     try:
-        response = await client.get(f"{instance}/health", timeout=timeouts.HEALTH_PROBE_S,
+        response = await client.get(f"{instance}/health/ready", timeout=timeouts.HEALTH_PROBE_S,
                                     headers={REQUEST_ID_HEADER: rid})
         up = response.status_code < 400
     except Exception:

@@ -40,6 +40,12 @@ def create_app(with_db: bool = True, lifespan=None) -> FastAPI:
 
     app = FastAPI(title=SERVICE, lifespan=lifespan, redoc_url=None)  # Swagger UI: /docs
 
+    @app.get("/health/live")
+    async def _live():
+        # Liveness: the process serves requests. Never touches the DB, so a DB outage does not make
+        # Docker (or an orchestrator) restart healthy containers. Readiness is /health/ready, per service.
+        return {"ok": True}
+
     @app.get("/metrics")
     async def _metrics():
         return PlainTextResponse(metrics_text(), media_type="text/plain; version=0.0.4")
