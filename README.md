@@ -51,7 +51,8 @@ experiments/              HOW the experiments are run
 ├── campaign.ts             all 6 scenarios in a row
 ├── metrics.ts              MTTF, MTBF, MTTR, availability, data consistency
 ├── demo.ts                 live demonstration of 4 failure-and-recovery scenarios
-└── up.ts                   deploy baseline or FT (npm run up:ft | up:baseline)
+├── env.ts                  mode → .env builder (pure, tested by env.test.ts)
+└── up.ts                   deploy a mode (npm run up:baseline | up:midterm | up:endterm)
 
 logs/                     raw data: logs/<scenario>__<mode>/{workload,events}.jsonl.gz
 reports/                  everything written up
@@ -69,9 +70,17 @@ reports/                  everything written up
 Same commands on Windows, macOS and Linux. Needs Docker and Node.js 22.6 or newer
 (`node --version`; with nvm: `nvm use 22`). No other dependencies.
 
-    npm run up:ft           # deploy the fault-tolerant version  (FT_ENABLED=1)
-    npm run up:baseline     # deploy the baseline                (FT_ENABLED=0)
-    npm run mode            # which version is running now
+`npm run up:<mode>` writes `.env` (see `.env.example`): the mode switches are
+overwritten each time, secrets already in `.env` are kept, and missing ones are
+generated randomly. `.env` is git-ignored. The midterm as submitted is tagged
+`midterm-final`.
+
+    npm run up:baseline     # deploy the baseline           (FT_ENABLED=0, ENDTERM_ENABLED=0)
+    npm run up:midterm      # deploy the midterm FT system  (FT_ENABLED=1, ENDTERM_ENABLED=0)
+    npm run up:endterm      # deploy the endterm system     (FT_ENABLED=1, ENDTERM_ENABLED=1)
+    npm run up:ft           # alias of up:midterm, kept so the midterm docs stay valid
+    npm run mode            # which mode is running now: baseline | midterm | endterm
+    npm run test:harness    # unit tests of the TypeScript harness (node --test)
 
     npm run demo            # live demo: app crash, DB failure, node failure, timetable
     npm run demo -- db-failure   # just one scenario

@@ -3,7 +3,8 @@ x-service: &service
   build: .
   restart: ${RESTART_POLICY:-no}            # H3 self-healing
   environment: &service-env
-    FT_ENABLED: ${FT_ENABLED:-0}            # the one switch: baseline (0) or FT (1)
+    FT_ENABLED: ${FT_ENABLED:-0}            # baseline (0) or FT (1)
+    ENDTERM_ENABLED: ${ENDTERM_ENABLED:-0}  # with FT=1: midterm (0) or endterm (1)
     LOG_DIR: /logs
     DATABASE_URL: postgresql://postgres:postgres@postgres-primary:5432/university
     DATABASE_REPLICA_URL: postgresql://postgres:postgres@postgres-replica:5432/university

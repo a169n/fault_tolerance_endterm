@@ -5,7 +5,7 @@ import os
 import pathlib
 import time
 from collections import Counter
-from typing import Dict
+from typing import Dict, Literal
 
 LOG_DIR = os.environ.get("LOG_DIR", "/logs")
 SERVICE = os.environ.get("SERVICE_NAME", "unknown")
@@ -21,13 +21,24 @@ def ft_enabled() -> bool:
     return os.environ.get("FT_ENABLED") == "1"  # baseline vs FT switch
 
 
+def endterm_enabled() -> bool:
+    # endterm builds on the midterm FT mechanisms, so it is only on when FT is on too
+    return ft_enabled() and os.environ.get("ENDTERM_ENABLED") == "1"
+
+
+def mode() -> Literal["baseline", "midterm", "endterm"]:
+    if endterm_enabled():
+        return "endterm"
+    return "midterm" if ft_enabled() else "baseline"
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
 
 def log(**event) -> None:
     _stream.write(
-        json.dumps({"ts": now_ms(), "svc": SERVICE, "ft": 1 if ft_enabled() else 0, **event}) + "\n"
+        json.dumps({"ts": now_ms(), "svc": SERVICE, "ft": 1 if ft_enabled() else 0, "mode": mode(), **event}) + "\n"
     )
     _counts[(event["kind"], _outcome(event))] += 1
     if event["kind"] == "health":

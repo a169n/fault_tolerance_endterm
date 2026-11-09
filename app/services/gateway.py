@@ -11,7 +11,7 @@ from fastapi import Body, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 
 from ..core.errors import UpstreamError
-from ..core.eventlog import ft_enabled, log
+from ..core.eventlog import endterm_enabled, ft_enabled, log, mode
 from ..core.service import create_app
 from ..fault_tolerance.infrastructure import load_balancer
 from ..fault_tolerance.software import circuit_breaker, health_check, idempotency
@@ -49,7 +49,8 @@ app = create_app(with_db=False, lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "ft": ft_enabled(), "instances": health_check.snapshot()}
+    return {"ok": True, "ft": ft_enabled(), "endterm": endterm_enabled(), "mode": mode(),
+            "instances": health_check.snapshot()}
 
 
 class Pool(str, Enum):
