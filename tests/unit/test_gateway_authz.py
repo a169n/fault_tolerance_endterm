@@ -223,3 +223,64 @@ def test_deny_reasons_exported_from_start(endterm: None) -> None:
     for reason in ("missing_token", "expired", "bad_signature", "bad_audience", "malformed",
                    "forbidden", "not_owner", "no_rule", "policy_error"):
         assert REGISTRY.get_sample_value("auth_denied_total", {"reason": reason}) is not None, reason
+
+
+def test_degraded_fallback_never_serves_another_pools_cached_payload(endterm: None,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """S7 must not bypass the policy: the stale cache is per pool, not per path.
+
+    GET /api/timetables/{term} is open to every student and ``term`` is free-form, so a stale cache
+    keyed by path alone would hand s8's transcript, cached for staff, to s7 asking for timetable "s8".
+    """
+    from app.fault_tolerance.software import circuit_breaker
+    from app.fault_tolerance.software.degradation import StaleCache
+    from app.services import gateway
+
+    monkeypatch.setattr(circuit_breaker, "_breakers", {})
+    monkeypatch.setattr(gateway, "_last_good", StaleCache())
+    for pool in ("students", "transcripts", "timetables"):
+        monkeypatch.setitem(gateway.POOLS, pool, [f"http://{pool}-1:3000"])
+    secret_record = {"studentId": "s8", "grades": ["A"], "balance": 1234}
+
+    async def fake_request(method, url, content=None, headers=None, timeout=None):
+        if url.startswith("http://timetables-1"):
+            raise httpx.ConnectError("timetables down")
+        return httpx.Response(200, json=secret_record)
+
+    monkeypatch.setattr(gateway._client, "request", fake_request)
+    client = _client()
+    staff, student = _bearer("bursar", "staff"), _bearer("s7", "student", "s7")
+    for pool in ("transcripts", "students"):  # staff warm the cache with s8's records
+        assert client.get(f"/api/{pool}/s8", headers=staff).status_code == 200
+        assert client.get(f"/api/{pool}/s8", headers=student).status_code == 403
+
+    response = client.get("/api/timetables/s8", headers=student)
+    assert response.status_code != 203
+    assert "balance" not in response.text and "grades" not in response.text
+    assert response.status_code >= 500
+
+
+def test_degraded_fallback_still_serves_the_same_pools_cached_payload(endterm: None,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.fault_tolerance.software import circuit_breaker
+    from app.fault_tolerance.software.degradation import StaleCache
+    from app.services import gateway
+
+    monkeypatch.setattr(circuit_breaker, "_breakers", {})
+    monkeypatch.setattr(gateway, "_last_good", StaleCache())
+    monkeypatch.setitem(gateway.POOLS, "timetables", ["http://timetables-1:3000"])
+    state = {"down": False}
+
+    async def fake_request(method, url, content=None, headers=None, timeout=None):
+        if state["down"]:
+            raise httpx.ConnectError("timetables down")
+        return httpx.Response(200, json={"term": "2026F", "slots": 3})
+
+    monkeypatch.setattr(gateway._client, "request", fake_request)
+    client = _client()
+    student = _bearer("s7", "student", "s7")
+    assert client.get("/api/timetables/2026F", headers=student).status_code == 200
+    state["down"] = True
+    response = client.get("/api/timetables/2026F", headers=student)
+    assert response.status_code == 203
+    assert response.json()["data"] == {"term": "2026F", "slots": 3}

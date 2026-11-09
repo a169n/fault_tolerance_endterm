@@ -203,6 +203,9 @@ async def proxy(pool: str, request: Request, path: str, public: bool = False):
     body = await request.body()
     target_path = f"/{path}" if path else "/"
     query = request.url.query
+    # S7 key: the policy decides on (pool, path), so a stale payload may only answer the same pair.
+    # A path-only key would let an allowed GET /api/timetables/s8 return s8's cached transcript.
+    stale_key = f"{pool}{target_path}"
 
     outliers = outlier_ejection.for_pool(pool, POOLS[pool]) if endterm_enabled() else None
     ring = load_balancer.ring(pool, POOLS[pool], health_check.is_up,  # H1 + S4 (+ ejection in endterm)
@@ -240,10 +243,10 @@ async def proxy(pool: str, request: Request, path: str, public: bool = False):
         if attempts > 1:
             log(kind="recovery", target=pool, action="retry_succeeded", attempts=attempts)
         if method == "GET":
-            _last_good.remember(target_path, payload)
+            _last_good.remember(stale_key, payload)
         return JSONResponse(status_code=status, content=payload)
     except Exception as exc:
-        stale = _last_good.fallback(target_path, pool) if method == "GET" else None   # S7
+        stale = _last_good.fallback(stale_key, pool) if method == "GET" else None   # S7
         if stale is not None:
             return stale
         status = exc.status if isinstance(exc, UpstreamError) and exc.status >= 400 else 503
