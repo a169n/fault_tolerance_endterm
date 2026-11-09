@@ -7,10 +7,23 @@ from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from . import metrics
 from .context import HEADER as REQUEST_ID_HEADER
 from .context import REQUEST_ID, accept_request_id
 from .eventlog import SERVICE, log, metrics_text
 from .errors import UpstreamError
+
+# Probes, scrapes and the API docs are not workload: counting them would dilute error rates and latency.
+_NOT_WORKLOAD = ("/health", "/metrics", "/docs", "/openapi.json")
+
+
+def _is_workload(path: str) -> bool:
+    return not any(path == p or path.startswith(p + "/") for p in _NOT_WORKLOAD)
+
+
+def _route_label(request: Request) -> str:
+    route = request.scope.get("route")  # set by the router on a match: the template, not the raw path
+    return getattr(route, "path", None) or metrics.UNMATCHED
 
 
 def create_app(with_db: bool = True, lifespan=None) -> FastAPI:
@@ -37,7 +50,7 @@ def create_app(with_db: bool = True, lifespan=None) -> FastAPI:
 
     @app.middleware("http")
     async def _observe(request: Request, call_next):
-        started = time.time()
+        started = time.perf_counter()
         rid = accept_request_id(request.headers.get(REQUEST_ID_HEADER))  # hostile ids never reach a log
         token = REQUEST_ID.set(rid)  # seen by the handler, its log lines and the gateway's forwarding
         try:
@@ -47,10 +60,12 @@ def create_app(with_db: bool = True, lifespan=None) -> FastAPI:
                 response = JSONResponse(status_code=exc.status or 503, content={"error": str(exc)})
             except Exception as exc:
                 response = JSONResponse(status_code=503, content={"error": str(exc)})
-            ms = int((time.time() - started) * 1000)
-            if request.url.path not in ("/health", "/metrics", "/docs", "/openapi.json"):  # not workload
+            seconds = time.perf_counter() - started
+            if _is_workload(request.url.path):
+                metrics.observe_request(SERVICE, request.method, _route_label(request),
+                                        response.status_code, seconds)
                 log(kind="request", target=f"{request.method} {request.url.path}",
-                    ok=response.status_code < 500, status=response.status_code, ms=ms)
+                    ok=response.status_code < 500, status=response.status_code, ms=int(seconds * 1000))
         finally:
             REQUEST_ID.reset(token)
         response.headers["x-served-by"] = SERVICE

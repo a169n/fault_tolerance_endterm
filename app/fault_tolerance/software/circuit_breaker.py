@@ -4,6 +4,7 @@ import os
 import time
 from typing import Dict, Optional
 
+from ...core import metrics
 from ...core.eventlog import log
 
 THRESHOLD = int(os.environ.get("FT_CB_THRESHOLD", 5))  # S3
@@ -17,6 +18,7 @@ class CircuitBreaker:
         self.cooldown_ms = cooldown_ms
         self.failures = 0
         self.last_failure_at = 0.0
+        metrics.CIRCUIT_OPEN.labels(name=name).set(0)  # exported from the start, so dashboards show "closed"
 
     def state(self, now_ms_: Optional[float] = None) -> str:
         now = time.time() * 1000 if now_ms_ is None else now_ms_
@@ -27,6 +29,7 @@ class CircuitBreaker:
     def success(self) -> None:
         if self.failures >= self.threshold:
             log(kind="breaker", target=self.name, state="closed")
+            metrics.CIRCUIT_OPEN.labels(name=self.name).set(0)
         self.failures = 0
 
     def failure(self) -> None:
@@ -34,6 +37,7 @@ class CircuitBreaker:
         self.last_failure_at = time.time() * 1000
         if self.failures == self.threshold:
             log(kind="breaker", target=self.name, state="open")
+            metrics.CIRCUIT_OPEN.labels(name=self.name).set(1)
 
 
 _breakers: Dict[str, CircuitBreaker] = {}

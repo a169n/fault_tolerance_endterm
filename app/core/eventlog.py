@@ -7,6 +7,7 @@ import time
 from collections import Counter
 from typing import Dict, Literal
 
+from . import metrics
 from .context import REQUEST_ID
 
 LOG_DIR = os.environ.get("LOG_DIR", "/logs")
@@ -58,7 +59,9 @@ def _outcome(event: dict) -> str:
 
 
 def metrics_text() -> str:
-    lines = ["# HELP ft_events_total Events logged, by kind and outcome.", "# TYPE ft_events_total counter"]
+    # prometheus_client series (requests, latency, upstream, health, breaker, integrity) + event counters
+    lines = [metrics.render().rstrip("\n"),
+             "# HELP ft_events_total Events logged, by kind and outcome.", "# TYPE ft_events_total counter"]
     lines += [f'ft_events_total{{svc="{SERVICE}",kind="{kind}",outcome="{outcome}"}} {n}'
               for (kind, outcome), n in sorted(_counts.items())]
     if _instance_up:

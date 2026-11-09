@@ -123,7 +123,8 @@ async def proxy(pool: str, request: Request, path: str):
             return response.status_code, None
 
     try:
-        (status, payload), attempts = await call(pool, attempt, circuit_breaker.for_pool(pool))  # S1 S2 S3
+        (status, payload), attempts = await call(pool, attempt, circuit_breaker.for_pool(pool),  # S1 S2 S3
+                                                instance=lambda: chosen["instance"])
         log(kind="route", target=pool, instance=chosen["instance"], ok=True, attempts=attempts)  # which replica answered
         if attempts > 1:
             log(kind="recovery", target=pool, action="retry_succeeded", attempts=attempts)

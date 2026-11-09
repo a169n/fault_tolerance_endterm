@@ -8,18 +8,40 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .. import fault_injection
+from ..core import metrics
 from ..core.db import close_pools, db_healthy, open_pools, read, to_jsonable, transaction
 from ..core.eventlog import ft_enabled, log
 from ..core.service import create_app
 from ..fault_tolerance.software import checkpoint_rollback, idempotency
 
+STALE_PENDING_REFRESH_S = 5
+STALE_PENDING_SQL = (  # a pending row this old was lost or interrupted mid-payment (PaymentsStuckPending)
+    "SELECT count(*) AS n FROM payments WHERE state = 'pending' AND created_at < now() - interval '15 seconds'"
+)
+
+
+async def refresh_stale_pending() -> None:
+    try:
+        rows = await read(STALE_PENDING_SQL)
+    except Exception:
+        return  # DB unreachable: keep the last value; DatabaseDown is the alert for that
+    metrics.set_stale_pending(rows[0]["n"] if rows else 0)
+
+
+async def stale_pending_loop() -> None:  # every mode: integrity is measured the same way in all three
+    while True:
+        await refresh_stale_pending()
+        await asyncio.sleep(STALE_PENDING_REFRESH_S)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await open_pools()
-    task = asyncio.create_task(checkpoint_rollback.sweep_loop())   # S6 recovery
+    tasks = [asyncio.create_task(checkpoint_rollback.sweep_loop()),   # S6 recovery
+             asyncio.create_task(stale_pending_loop())]
     yield
-    task.cancel()
+    for task in tasks:
+        task.cancel()
     await close_pools()
 
 

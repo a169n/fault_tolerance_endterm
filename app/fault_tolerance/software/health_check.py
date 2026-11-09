@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import httpx
 
+from ...core import metrics
 from ...core.context import HEADER as REQUEST_ID_HEADER
 from ...core.context import new_request_id
 from ...core.eventlog import log
@@ -36,6 +37,7 @@ async def _probe(client: httpx.AsyncClient, instance: str) -> None:
     if was != up:
         log(kind="health", target=instance, ok=up, transition=f"{was}->{up}", rid=rid)  # detection time
     _status[instance] = up
+    metrics.INSTANCE_UP.labels(target=instance).set(1 if up else 0)  # every probe, not only transitions
 
 
 async def loop(client: httpx.AsyncClient, instances: List[str]) -> None:

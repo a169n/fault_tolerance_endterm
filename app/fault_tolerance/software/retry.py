@@ -6,6 +6,9 @@ import random
 import time
 from typing import Awaitable, Callable, Optional, Tuple, TypeVar
 
+import httpx
+
+from ...core import metrics
 from ...core.errors import UpstreamError
 from ...core.eventlog import ft_enabled, log
 from . import timeouts
@@ -23,6 +26,15 @@ def _retryable(exc: BaseException) -> bool:
     return True
 
 
+def _attempt_outcome(exc: BaseException) -> str:
+    # The gateway wraps transport errors in UpstreamError; the cause tells a timeout from a refusal.
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return "timeout"
+    if isinstance(exc.__cause__, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return "timeout"
+    return "error"
+
+
 def backoff_s(attempt: int) -> float:
     return random.random() * (BACKOFF_MS / 1000) * 2 ** (attempt - 1)  # full jitter
 
@@ -31,20 +43,34 @@ async def call(
     target: str,
     fn: Callable[[Optional[float]], Awaitable[T]],
     breaker: Optional[CircuitBreaker] = None,
+    instance: Optional[Callable[[], str]] = None,
 ) -> Tuple[T, int]:
+    """``instance`` names the replica the last attempt went to (the caller picks it inside ``fn``);
+    it labels ``upstream_attempts_total`` so a single bad instance stands out."""
     started = time.time() * 1000
 
-    if not ft_enabled():
-        return await fn(None), 1  # baseline: one attempt, no timeout
+    def record(outcome: str) -> None:
+        metrics.upstream_attempt(target, instance() if instance is not None else target, outcome)
+
+    if not ft_enabled():  # baseline: one attempt, no timeout (measured the same way as the FT modes)
+        try:
+            value = await fn(None)
+        except Exception as exc:  # a cancelled request is not an upstream outcome
+            record(_attempt_outcome(exc))
+            raise
+        record("ok")
+        return value, 1
 
     if breaker is not None and breaker.state() == "open":  # S3
         log(kind="upstream", target=target, ok=False, err="circuit_open", ms=0, attempts=0, breaker="open")
+        metrics.upstream_attempt(target, "none", "circuit_open")  # no instance was tried
         raise UpstreamError(f"circuit open for {target}", 503)
 
     last_error: Optional[BaseException] = None
     for attempt in range(1, RETRIES + 1):
         try:
             value = await asyncio.wait_for(fn(timeouts.PER_ATTEMPT_S), timeout=timeouts.PER_ATTEMPT_S)  # S2
+            record("ok")
             if breaker is not None:
                 breaker.success()
             ms = int(time.time() * 1000 - started)
@@ -53,6 +79,7 @@ async def call(
             return value, attempt
         except (Exception, asyncio.TimeoutError) as exc:
             last_error = exc
+            record(_attempt_outcome(exc))
             if breaker is not None:
                 breaker.failure()
             log(kind="attempt", target=target, ok=False, attempts=attempt,  # detection timestamp
