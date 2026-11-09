@@ -65,6 +65,15 @@ async def read(sql: str, params: Sequence[Any] = ()) -> List[Row]:
     return await db_failover.read(lambda pool: _query(pool, sql, params), _primary, _replica)  # H2
 
 
+async def read_primary(sql: str, params: Sequence[Any] = ()) -> List[Row]:
+    # Background probes only: primary or nothing. Going through db_failover.read would log a
+    # "degraded" read_from_replica event per poll and inflate the request-level FT metrics.
+    try:
+        return await _query(_primary, sql, params)
+    except Exception as exc:
+        raise UpstreamError(str(exc), 503) from exc
+
+
 async def write(sql: str, params: Sequence[Any] = ()) -> List[Row]:  # primary only
     try:
         return await _query(_primary, sql, params)

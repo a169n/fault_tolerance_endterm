@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from .. import fault_injection
 from ..core import metrics
-from ..core.db import close_pools, db_healthy, open_pools, read, to_jsonable, transaction
+from ..core.db import close_pools, db_healthy, open_pools, read, read_primary, to_jsonable, transaction
 from ..core.eventlog import ft_enabled, log
 from ..core.service import create_app
 from ..fault_tolerance.software import checkpoint_rollback, idempotency
@@ -22,9 +22,9 @@ STALE_PENDING_SQL = (  # a pending row this old was lost or interrupted mid-paym
 
 async def refresh_stale_pending() -> None:
     try:
-        rows = await read(STALE_PENDING_SQL)
+        rows = await read_primary(STALE_PENDING_SQL)  # not read(): no replica fallback, no "degraded" event
     except Exception:
-        return  # DB unreachable: keep the last value; DatabaseDown is the alert for that
+        return  # primary unreachable: keep the last value; DatabaseDown is the alert for that
     metrics.set_stale_pending(rows[0]["n"] if rows else 0)
 
 

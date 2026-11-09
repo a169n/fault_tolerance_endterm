@@ -236,7 +236,7 @@ def test_stale_pending_gauge_refreshed_from_query(monkeypatch: pytest.MonkeyPatc
         seen["sql"] = sql
         return [{"n": 3}]
 
-    monkeypatch.setattr(payment, "read", fake_read)
+    monkeypatch.setattr(payment, "read_primary", fake_read)
     asyncio.run(payment.refresh_stale_pending())
     assert "state = 'pending'" in seen["sql"] and "15 seconds" in seen["sql"]
     assert REGISTRY.get_sample_value("payments_stale_pending") == 3
@@ -251,9 +251,57 @@ def test_stale_pending_keeps_last_value_when_db_down(monkeypatch: pytest.MonkeyP
     async def down_read(sql, params=()):
         raise UpstreamError("db down", 503)
 
-    monkeypatch.setattr(payment, "read", ok_read)
+    monkeypatch.setattr(payment, "read_primary", ok_read)
     asyncio.run(payment.refresh_stale_pending())
-    monkeypatch.setattr(payment, "read", down_read)
+    monkeypatch.setattr(payment, "read_primary", down_read)
     asyncio.run(payment.refresh_stale_pending())  # must not raise: the loop has to survive an outage
     assert REGISTRY.get_sample_value("payments_stale_pending") == 2
 
+
+
+def test_stale_pending_probe_never_logs_replica_fallback(ft, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 5 s probe is not workload: with FT on and the primary down it must not emit 'degraded' events."""
+    from app.core import db, eventlog
+    from app.services import payment
+
+    class _DownPool:
+        def connection(self):
+            raise ConnectionError("primary down")
+
+    class _ReplicaConn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def cursor(self, row_factory=None):
+            return _ReplicaCursor()
+
+    class _ReplicaCursor(_ReplicaConn):
+        description = ("n",)
+
+        async def execute(self, sql, params):
+            pass
+
+        async def fetchall(self):
+            return [{"n": 7}]
+
+    class _ReplicaPool:
+        def connection(self):
+            return _ReplicaConn()
+
+    monkeypatch.setattr(db, "_primary", _DownPool())
+    monkeypatch.setattr(db, "_replica", _ReplicaPool())
+    key = ("degraded", "read_from_replica")
+
+    before = eventlog._counts[key]
+    asyncio.run(db.read("SELECT 1"))  # control: the request path does fail over and log it
+    assert eventlog._counts[key] == before + 1
+
+    metrics.set_stale_pending(4)
+    before = eventlog._counts[key]
+    for _ in range(3):
+        asyncio.run(payment.refresh_stale_pending())
+    assert eventlog._counts[key] == before
+    assert REGISTRY.get_sample_value("payments_stale_pending") == 4  # primary down: last value kept
