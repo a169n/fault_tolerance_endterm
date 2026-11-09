@@ -105,10 +105,21 @@ After pulling schema changes, recreate the database once: `docker compose down -
 | payment-1 / payment-2 | 3021 / 3022 | 2 replicas |
 | timetable-1 / timetable-2 | 3041 / 3042 | 2 replicas |
 | transcript-1 | 3031 | 1 |
+| auth-1 | 127.0.0.1:3051 | 1; issues JWTs, reached through the gateway as `POST /auth/token` |
 | postgres-primary / postgres-replica | 55432 / 55433 | primary + hot standby |
 | prometheus | 127.0.0.1:9090 | 1, always on (alert rules: `config/prometheus/alerts.yml`) |
 | grafana | 127.0.0.1:3000 | 1, always on (dashboard `university`) |
 | postgres-exporter | 127.0.0.1:9187 | 1, always on (`pg_up`, replication) |
+
+## Logging in
+
+The auth service issues 15-minute JWTs (HS256) through the gateway. The demo users are
+`admin` (admin), `bursar` (staff), `s7` and `s8` (students), all with `DEMO_PASSWORD` from `.env`:
+
+    curl -s localhost:8080/auth/token -d '{"username":"bursar","password":"'$DEMO_PASSWORD'"}'
+
+Only endterm requires the token on `/api/*` (Task 9). The gateway verifies it with
+`JWT_SECRET`, so an `auth-1` outage blocks new logins but not existing sessions.
 
 ## Breaking it by hand
 

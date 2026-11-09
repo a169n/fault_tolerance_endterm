@@ -15,7 +15,7 @@ const writeJsonlGz = (path: string, rows: unknown[]): void =>
 const ms = (v: number | null | undefined) => (v == null ? 'n/a' : `${v} ms`);
 const pctStr = (v: number | null) => (v == null ? 'n/a' : `${(v * 100).toFixed(2)} %`);
 const GATEWAY = 'http://localhost:8080';   // nginx: the entry point clients use
-const INSTANCES = [8081, 8082, 3011, 3012, 3021, 3022, 3031, 3041, 3042];  // both gateways (direct) + every service replica
+const INSTANCES = [8081, 8082, 3011, 3012, 3021, 3022, 3031, 3041, 3042, 3051];  // both gateways (direct) + every service replica + auth-1
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

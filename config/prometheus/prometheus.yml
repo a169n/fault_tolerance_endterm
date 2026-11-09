@@ -25,6 +25,7 @@ scrape_configs:
           - transcript-1:3000
           - timetable-1:3000
           - timetable-2:3000
+          - auth-1:3000           # failed logins: auth_denied_total{reason="invalid_credentials"}
 
   # PostgreSQL primary, through postgres-exporter (connects as the pg_monitor `monitor` role).
   # pg_up == 0 means the exporter cannot reach the primary (DatabaseDown). With the primary

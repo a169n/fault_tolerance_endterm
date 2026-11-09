@@ -30,6 +30,7 @@ POOLS: Dict[str, List[str]] = {  # replicas, from docker-compose.yml
     "payments": _urls(os.environ.get("PAYMENT_URLS")),
     "transcripts": _urls(os.environ.get("TRANSCRIPT_URLS")),
     "timetables": _urls(os.environ.get("TIMETABLE_URLS")),
+    "auth": _urls(os.environ.get("AUTH_URLS")),  # login only; not reachable under /api (not a Pool)
 }
 
 _client = httpx.AsyncClient(timeout=None)
@@ -88,6 +89,19 @@ async def create(pool: Pool, request: Request, body: Optional[dict] = BODY,
 async def create_at(pool: Pool, path: str, request: Request, body: Optional[dict] = BODY,
                     idempotency_key: Optional[str] = Header(None)):
     return await proxy(pool.value, request, path)
+
+
+_LOGIN_DOC = {"requestBody": {"content": {"application/json": {"schema": {
+    "type": "object", "required": ["username", "password"],
+    "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}}}}}
+
+
+@app.post("/auth/token", openapi_extra=_LOGIN_DOC)
+async def login(request: Request):
+    # The raw body is relayed whatever its content type (`curl -d` sends a form type); the auth
+    # service parses it. Same retry/breaker path as the API pools. Tokens are verified here at the
+    # gateway (Task 9), so an auth-1 outage blocks only new logins, not existing sessions.
+    return await proxy("auth", request, "token")
 
 
 def _ejection_outcome(outliers: Optional[outlier_ejection.OutlierDetector]):

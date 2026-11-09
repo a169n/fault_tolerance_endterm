@@ -55,6 +55,8 @@ services:
       PAYMENT_URLS: http://payment-1:3000,http://payment-2:3000
       TRANSCRIPT_URLS: http://transcript-1:3000
       TIMETABLE_URLS: http://timetable-1:3000,http://timetable-2:3000
+      AUTH_URLS: http://auth-1:3000                               # POST /auth/token is relayed here
+      JWT_SECRET: ${JWT_SECRET:?run npm run up:<mode> to generate .env}   # tokens are verified locally (Task 9)
     ports: ["127.0.0.1:8081:8080"]          # direct access for the harness and debugging; clients use nginx
 
   gateway-2:                                # redundant gateway, in nginx rotation only in endterm (redundant.conf)
@@ -64,6 +66,16 @@ services:
       <<: *gateway-env
       SERVICE_NAME: gateway-2
     ports: ["127.0.0.1:8082:8080"]
+
+  auth-1:                                   # issues short-lived JWTs (POST /token); seeds demo users on start
+    <<: *service
+    command: uvicorn app.services.auth:app --host 0.0.0.0 --port 3000
+    environment:
+      <<: *service-env
+      SERVICE_NAME: auth-1
+      JWT_SECRET: ${JWT_SECRET:?run npm run up:<mode> to generate .env}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?run npm run up:<mode> to generate .env}   # admin, bursar, s7, s8
+    ports: ["127.0.0.1:3051:3000"]
 
   student-1:                                # replica 1 · node A
     <<: *service
