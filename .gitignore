@@ -2,3 +2,4 @@ node_modules/
 logs/*.jsonl
 .env
 __pycache__/
+.pytest_cache/
