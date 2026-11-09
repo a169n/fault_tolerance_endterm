@@ -128,6 +128,10 @@ export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: num
   const ok = recs.filter((r) => r.ok);
   const latencies = ok.map((r) => r.ms);
   const count = (pred: (e: Event) => boolean) => events.filter(pred).length;
+  // Read availability: GETs only (students, transcripts). It survives a primary outage because reads
+  // fail over to the hot standby (H2), so db-failure is judged on reads, not on the writes that fail fast.
+  const reads = recs.filter((r) => r.op === 'students' || r.op === 'transcripts');
+  const readOk = reads.filter((r) => r.ok).length;
 
   return {
     observationMs,
@@ -144,6 +148,7 @@ export function computeMetrics(recs: Rec[], events: Event[], t0: number, t1: num
     availability: {
       timeBased: upBins + downBins === 0 ? null : upBins / (upBins + downBins),
       requestBased: recs.length === 0 ? null : ok.length / recs.length,
+      readRequestBased: reads.length === 0 ? null : readOk / reads.length,
       upBins, downBins, idleBins,
     },
     reliability: {

@@ -163,6 +163,17 @@ test('computeMetrics: avgMs, errorRate, rateLimited, alert detection and resourc
   assert.equal(m.throughput.duringFaultRps, 0);
 });
 
+test('computeMetrics: read availability counts only the read operations (students, transcripts)', () => {
+  const r = (op: string, ok: boolean, i: number): Rec =>
+    ({ ts: T0 + i * 10, op, status: ok ? 200 : 503, ok, degraded: false, ms: 5, rid: `r-${i}`, rateLimited: false });
+  const recs = [r('students', true, 0), r('transcripts', true, 1), r('students', false, 2), r('students', true, 3),
+    r('payments', false, 4), r('payments', false, 5)];
+  const m = computeMetrics(recs, [], T0, T0 + 1_000, T0 + 500);
+  assert.equal(m.availability.readRequestBased, 3 / 4);
+  assert.equal(m.availability.requestBased, 3 / 6);
+  assert.equal(computeMetrics([r('payments', true, 0)], [], T0, T0 + 1_000, T0 + 500).availability.readRequestBased, null);
+});
+
 test('foldAlerts: pending, then firing, then resolved, per alert name', () => {
   const s = new Map<string, AlertObs>();
   foldAlerts(s, [{ labels: { alertname: 'A' }, state: 'pending', activeAt: new Date(T0 - 500).toISOString() }], T0);
