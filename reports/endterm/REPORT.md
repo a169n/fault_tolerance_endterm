@@ -117,7 +117,7 @@ but this report does not yet claim that it works (spec §4: a mechanism in a dia
 | Deployment or scaling strategy | restart policy, healthchecks, nginx failover, replica pools; scaling and Kubernetes mapping in §3.7 | §3.6, §3.7 |
 | Evidence: updated architecture diagram | [`reports/ARCHITECTURE.md`](../ARCHITECTURE.md) §1 | — |
 | Evidence: configuration | `docker-compose.yml`, `config/nginx/`, `config/postgres/`, `config/prometheus/`, `config/grafana/` | — |
-| Evidence: demonstration of a service/instance failure | `npm run demo` (`app-crash`, `gateway-failure`), [`DEMO.md`](DEMO.md) | recording pending |
+| Evidence: demonstration of a service/instance failure | `npm run demo` (`app-crash`, `gateway-failure`), [`DEMO.md`](DEMO.md) | rehearsal transcripts in [`demo/`](demo/); video still to be recorded by the team |
 
 **Spec §3 — Fault detection, monitoring and observability**
 
@@ -221,7 +221,7 @@ but this report does not yet claim that it works (spec §4: a mechanism in a dia
 | Threat model and security controls | [`THREAT-MODEL.md`](THREAT-MODEL.md), §5 |
 | Automated tests and repeatable fault-injection/test scripts | `tests/`, `experiments/`, `.github/workflows/ci.yml` |
 | Experiment results table and final technical report | this report; `RESULTS.md` (pending) |
-| Live or recorded demo of ≥ 3 scenarios incl. one service failure and one security test | [`DEMO.md`](DEMO.md) (`app-crash`, `db-failure`, `gateway-failure`, `unauthorized`, `abuse`); recording pending |
+| Live or recorded demo of ≥ 3 scenarios incl. one service failure and one security test | [`DEMO.md`](DEMO.md) (`app-crash`, `db-failure`, `gateway-failure`, `unauthorized`, `abuse`); rehearsal transcripts in [`demo/`](demo/), video still to be recorded by the team |
 
 ---
 
