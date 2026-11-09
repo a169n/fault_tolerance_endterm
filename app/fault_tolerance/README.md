@@ -19,6 +19,7 @@ nothing that uses them.
 | S8  | Fail-fast writes                     | `[software/timeouts.py](software/timeouts.py)` `DB_ACQUIRE_S`        | no primary database → write fails in ms instead of hanging               |
 | S9  | Service replication                  | see H1                                                               |                                                                          |
 | S10 | Job checkpoint + lease adoption      | `[software/job_checkpoint.py](software/job_checkpoint.py)`           | timetable job saves progress; another replica resumes it after a crash   |
+| S11 | Outlier ejection (endterm only)      | `[software/outlier_ejection.py](software/outlier_ejection.py)`       | 3 failed attempts in a row on one replica → out of the ring for 10 s; never more than half a pool |
 
 
 
@@ -41,7 +42,7 @@ nothing that uses them.
 ## Where they are used
 
 ```
-client ─► services/gateway.py ── H1 load_balancer ── S4 health_check
+client ─► services/gateway.py ── H1 load_balancer ── S4 health_check ── S11 outlier_ejection (endterm)
                 │                S5 idempotency (forward key)
                 │                S1 retry ─ S2 timeout ─ S3 circuit_breaker
                 │                S7 degradation (stale cache)

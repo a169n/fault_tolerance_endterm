@@ -16,7 +16,7 @@ from ..core.errors import UpstreamError
 from ..core.eventlog import endterm_enabled, ft_enabled, log, mode
 from ..core.service import create_app
 from ..fault_tolerance.infrastructure import load_balancer
-from ..fault_tolerance.software import circuit_breaker, health_check, idempotency
+from ..fault_tolerance.software import circuit_breaker, health_check, idempotency, outlier_ejection
 from ..fault_tolerance.software.degradation import StaleCache
 from ..fault_tolerance.software.retry import call
 
@@ -39,9 +39,11 @@ _last_good = StaleCache()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     instances = [i for pool in POOLS.values() for i in pool]
-    task = asyncio.create_task(health_check.loop(_client, instances)) if ft_enabled() else None
+    tasks = [asyncio.create_task(health_check.loop(_client, instances))] if ft_enabled() else []
+    if endterm_enabled():
+        tasks.append(asyncio.create_task(outlier_ejection.loop(POOLS)))
     yield
-    if task is not None:
+    for task in tasks:
         task.cancel()
     await _client.aclose()
 
@@ -88,6 +90,12 @@ async def create_at(pool: Pool, path: str, request: Request, body: Optional[dict
     return await proxy(pool.value, request, path)
 
 
+def _ejection_outcome(outliers: Optional[outlier_ejection.OutlierDetector]):
+    if outliers is None:  # baseline and midterm: no per-instance bookkeeping
+        return None
+    return lambda instance, outcome: outliers.record(instance, outcome == "ok")  # error|timeout count
+
+
 async def proxy(pool: str, request: Request, path: str):
     if not POOLS.get(pool):
         return JSONResponse(status_code=404, content={"error": "unknown service"})
@@ -97,7 +105,9 @@ async def proxy(pool: str, request: Request, path: str):
     target_path = f"/{path}" if path else "/"
     query = request.url.query
 
-    ring = load_balancer.ring(pool, POOLS[pool], health_check.is_up)   # H1 + S4
+    outliers = outlier_ejection.for_pool(pool, POOLS[pool]) if endterm_enabled() else None
+    ring = load_balancer.ring(pool, POOLS[pool], health_check.is_up,  # H1 + S4 (+ ejection in endterm)
+                              is_ejected=outliers.is_ejected if outliers else lambda i: False)
     idem = idempotency.forward_key(request.headers)                    # S5
     rid = REQUEST_ID.get() or new_request_id()  # set by the middleware; every attempt reuses it
     chosen = {"instance": ring[0], "i": 0}
@@ -125,7 +135,8 @@ async def proxy(pool: str, request: Request, path: str):
 
     try:
         (status, payload), attempts = await call(pool, attempt, circuit_breaker.for_pool(pool),  # S1 S2 S3
-                                                instance=lambda: chosen["instance"])
+                                                instance=lambda: chosen["instance"],
+                                                on_outcome=_ejection_outcome(outliers))
         log(kind="route", target=pool, instance=chosen["instance"], ok=True, attempts=attempts)  # which replica answered
         if attempts > 1:
             log(kind="recovery", target=pool, action="retry_succeeded", attempts=attempts)

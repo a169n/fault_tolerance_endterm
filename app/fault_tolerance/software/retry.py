@@ -44,13 +44,18 @@ async def call(
     fn: Callable[[Optional[float]], Awaitable[T]],
     breaker: Optional[CircuitBreaker] = None,
     instance: Optional[Callable[[], str]] = None,
+    on_outcome: Optional[Callable[[str, str], None]] = None,
 ) -> Tuple[T, int]:
     """``instance`` names the replica the last attempt went to (the caller picks it inside ``fn``);
-    it labels ``upstream_attempts_total`` so a single bad instance stands out."""
+    it labels ``upstream_attempts_total`` so a single bad instance stands out. ``on_outcome`` is
+    told (instance, outcome) after every attempt that reached an instance (outlier ejection)."""
     started = time.time() * 1000
 
     def record(outcome: str) -> None:
-        metrics.upstream_attempt(target, instance() if instance is not None else target, outcome)
+        name = instance() if instance is not None else target
+        metrics.upstream_attempt(target, name, outcome)
+        if on_outcome is not None:
+            on_outcome(name, outcome)
 
     if not ft_enabled():  # baseline: one attempt, no timeout (measured the same way as the FT modes)
         try:
