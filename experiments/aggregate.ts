@@ -419,12 +419,20 @@ export function renderCsv(rows: Row[]): string {
 
 // ---------------------------------------------------------------- CLI
 
-export function loadRuns(dir: string): RunResult[] {
+// Repetition 0 is the smoke-test slot (npm run exp <s> -- --rep 0), never part of the campaign,
+// so it is skipped unless explicitly requested.
+export function loadRuns(dir: string, includeSmoke = false): RunResult[] {
   if (!existsSync(dir)) return [];
   const runs: RunResult[] = [];
   for (const d of readdirSync(dir).sort()) {
+    if (!includeSmoke && /__r0$/.test(d)) continue;
     const f = join(dir, d, 'metrics.json');
-    if (existsSync(f)) runs.push(JSON.parse(readFileSync(f, 'utf8')) as RunResult);
+    if (!existsSync(f)) continue;
+    try {
+      runs.push(JSON.parse(readFileSync(f, 'utf8')) as RunResult);
+    } catch (e) {
+      throw new Error(`cannot parse ${f}: ${(e as Error).message}`);
+    }
   }
   return runs;
 }

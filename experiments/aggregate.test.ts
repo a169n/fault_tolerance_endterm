@@ -125,3 +125,20 @@ test('renderCsv: a header plus one line per (scenario, mode) group with the same
   for (const l of lines) assert.equal(l.split(',').length, width);
   assert.match(lines[0], /^scenario,mode,n,verdict,/);
 });
+
+test('loadRuns skips smoke-test repetition 0 and names an unreadable file', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { loadRuns } = await import('./aggregate.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'agg-'));
+  for (const [d, body] of [['a__endterm__r0', '{"scenario":"a"}'], ['a__endterm__r1', '{"scenario":"a"}']]) {
+    mkdirSync(join(dir, d));
+    writeFileSync(join(dir, d, 'metrics.json'), body);
+  }
+  assert.equal(loadRuns(dir).length, 1);
+  assert.equal(loadRuns(dir, true).length, 2);
+  mkdirSync(join(dir, 'b__endterm__r1'));
+  writeFileSync(join(dir, 'b__endterm__r1', 'metrics.json'), '{"trunc');
+  assert.throws(() => loadRuns(dir), /b__endterm__r1/);
+});
