@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline/promises';
-import { SCENARIOS, dc } from './scenarios.ts';
+import { SCENARIOS, chaosHeaders, dc } from './scenarios.ts';
 
 const GW = 'http://localhost:8080';
 const PAY = { studentId: 's7', amount: 100 };
@@ -88,7 +88,8 @@ async function timetable() {
   console.log(`job ${term} started on ${owner}`);
   await sleep(2000);
   console.log(`  t+2s   ${await show()}`);
-  await fetch(`http://localhost:304${owner.slice(-1)}/chaos/crash`, { method: 'POST' }).catch(() => {});  // timetable-1 -> :3041
+  await fetch(`http://localhost:304${owner.slice(-1)}/chaos/crash`, { method: 'POST', headers: chaosHeaders() })  // timetable-1 -> :3041
+    .catch(() => {});
   console.log(`  ${owner} crashed`);
   for (let i = 3; i <= 16; i++) {
     await sleep(1000);

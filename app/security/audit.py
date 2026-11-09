@@ -30,7 +30,9 @@ Outcome = Literal["allow", "deny"]
 
 LOGIN_REASONS = ("invalid_credentials",)  # counted by the auth service
 THROTTLE_REASONS = (rate_limit.REASON,)  # a 429 from the gateway's rate limiter (Task 11)
-REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS + THROTTLE_REASONS + LOGIN_REASONS + ("other",)))
+CHAOS_REASON = "bad_chaos_token"  # /chaos* without the right x-chaos-token, counted by each service (Task 12)
+REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS + THROTTLE_REASONS + LOGIN_REASONS
+                              + (CHAOS_REASON, "other")))
 GATEWAY_REASONS = tuple(dict.fromkeys(policy.REASONS + tokens.REASONS + THROTTLE_REASONS))  # 0 from start-up
 
 REDACTED = "[redacted]"

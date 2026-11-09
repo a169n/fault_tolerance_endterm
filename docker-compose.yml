@@ -6,8 +6,9 @@ x-service: &service
     FT_ENABLED: ${FT_ENABLED:-0}            # baseline (0) or FT (1)
     ENDTERM_ENABLED: ${ENDTERM_ENABLED:-0}  # with FT=1: midterm (0) or endterm (1)
     LOG_DIR: /logs
-    DATABASE_URL: postgresql://postgres:postgres@postgres-primary:5432/university
-    DATABASE_REPLICA_URL: postgresql://postgres:postgres@postgres-replica:5432/university
+    # least-privilege role app_rw (no DELETE/TRUNCATE/DDL); password generated into .env (Task 12)
+    DATABASE_URL: postgresql://app_rw:${APP_DB_PASSWORD:?run npm run up:<mode> to generate .env}@postgres-primary:5432/university
+    DATABASE_REPLICA_URL: postgresql://app_rw:${APP_DB_PASSWORD:?run npm run up:<mode> to generate .env}@postgres-replica:5432/university
     PORT: 3000                              # uvicorn port, read by the healthcheck (gateway: 8080)
   volumes:
     - ./logs:/logs                          # every service appends to logs/events.jsonl
@@ -21,6 +22,12 @@ x-service: &service
     postgres-primary:
       condition: service_healthy
 
+# The services that expose /chaos (student, payment, timetable, transcript). In endterm every /chaos*
+# request must carry x-chaos-token == CHAOS_TOKEN (app/fault_injection.py, Task 12), so only they get it.
+x-chaos-env: &chaos-env
+  <<: *service-env
+  CHAOS_TOKEN: ${CHAOS_TOKEN:?run npm run up:<mode> to generate .env}
+
 services:
 
   # Entry point. nginx publishes :8080 and proxies to the gateway(s); NGINX_PROFILE picks the config:
@@ -31,7 +38,7 @@ services:
     restart: ${RESTART_POLICY:-no}          # H3
     volumes:
       - ./config/nginx/${NGINX_PROFILE:-single}.conf:/etc/nginx/nginx.conf:ro
-    ports: ["8080:80"]
+    ports: ["8080:80"]                      # the only port published beyond the host: clients use this
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health/live"]
       interval: 2s
@@ -80,60 +87,62 @@ services:
   student-1:                                # replica 1 · node A
     <<: *service
     command: uvicorn app.services.student:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: student-1 }
-    ports: ["3011:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: student-1 }
+    ports: ["127.0.0.1:3011:3000"]
 
   student-2:                                # replica 2 · node B
     <<: *service
     command: uvicorn app.services.student:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: student-2 }
-    ports: ["3012:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: student-2 }
+    ports: ["127.0.0.1:3012:3000"]
 
   payment-1:                                # replica 1 · node A
     <<: *service
     command: uvicorn app.services.payment:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: payment-1 }
-    ports: ["3021:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: payment-1 }
+    ports: ["127.0.0.1:3021:3000"]
 
   payment-2:                                # replica 2 · node B
     <<: *service
     command: uvicorn app.services.payment:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: payment-2 }
-    ports: ["3022:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: payment-2 }
+    ports: ["127.0.0.1:3022:3000"]
 
   timetable-1:                              # replica 1 · node A
     <<: *service
     command: uvicorn app.services.timetable:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: timetable-1 }
-    ports: ["3041:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: timetable-1 }
+    ports: ["127.0.0.1:3041:3000"]
 
   timetable-2:                              # replica 2 · node B
     <<: *service
     command: uvicorn app.services.timetable:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: timetable-2 }
-    ports: ["3042:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: timetable-2 }
+    ports: ["127.0.0.1:3042:3000"]
 
   transcript-1:                             # 1 instance, covered by S7 cache
     <<: *service
     command: uvicorn app.services.transcript:app --host 0.0.0.0 --port 3000
-    environment: { <<: *service-env, SERVICE_NAME: transcript-1 }
-    ports: ["3031:3000"]
+    environment: { <<: *chaos-env, SERVICE_NAME: transcript-1 }
+    ports: ["127.0.0.1:3031:3000"]
 
   postgres-primary:                         # H2: primary, the only writable copy
     image: postgres:16
     restart: ${RESTART_POLICY:-no}          # H3
     environment:
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run npm run up:<mode> to generate .env}  # superuser, operator only
       POSTGRES_DB: university
-      POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_INITDB_ARGS: --data-checksums   # H4
-      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?run npm run up:<mode> to generate .env}  # 00-roles.sh
+      # 00-roles.sh creates app_rw, repl and monitor with these on first initialisation of the volume
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?run npm run up:<mode> to generate .env}
+      REPL_PASSWORD: ${REPL_PASSWORD:?run npm run up:<mode> to generate .env}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?run npm run up:<mode> to generate .env}
     command: postgres -c hba_file=/etc/postgresql/pg_hba.conf -c wal_level=replica -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby=on
     volumes:
       - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
       - ./config/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - pgprimary:/var/lib/postgresql/data
-    ports: ["55432:5432"]   # 5432 often taken locally
+    ports: ["127.0.0.1:55432:5432"]   # 5432 often taken locally; host-only, password required (pg_hba.conf)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d university"]
       interval: 2s
@@ -146,9 +155,12 @@ services:
     depends_on:
       postgres-primary:
         condition: service_healthy
+    environment:
+      PGPASSWORD: ${REPL_PASSWORD:?run npm run up:<mode> to generate .env}   # pg_basebackup and streaming as repl
     volumes:
       - pgreplica:/var/lib/postgresql/data
-    ports: ["55433:5432"]
+      - ./config/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro   # same rules as the primary
+    ports: ["127.0.0.1:55433:5432"]
     command: >
       bash -c "
       if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then
@@ -157,7 +169,7 @@ services:
       fi;
       chown -R postgres:postgres /var/lib/postgresql/data;
       chmod 700 /var/lib/postgresql/data;
-      exec gosu postgres postgres
+      exec gosu postgres postgres -c hba_file=/etc/postgresql/pg_hba.conf
       "
 
   # Monitoring plane (H5): always on, in every mode, so the three configurations are measured

@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { chaosHeaders as headersFor, parseEnv } from './env.ts';
 
 const exec = promisify(execFile);
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -11,17 +13,28 @@ export const dc = async (...args: string[]): Promise<void> => {
   });
 };
 
+// x-chaos-token from .env (written by npm run up:<mode>). Read on each call so a regenerated .env is
+// picked up; the endterm services refuse /chaos* without it (403), baseline and midterm ignore it.
+export const chaosHeaders = (): Record<string, string> => {
+  const file = `${ROOT}.env`;
+  return existsSync(file) ? headersFor(parseEnv(readFileSync(file, 'utf8'))) : {};
+};
+
 const chaos = async (port: number, body: unknown): Promise<void> => {
   await fetch(`http://localhost:${port}/chaos`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...chaosHeaders() },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(3000),
   }).catch(() => {});
 };
 
 const crash = async (port: number): Promise<void> => {
-  await fetch(`http://localhost:${port}/chaos/crash`, { method: 'POST', signal: AbortSignal.timeout(3000) }).catch(() => {});
+  await fetch(`http://localhost:${port}/chaos/crash`, {
+    method: 'POST',
+    headers: chaosHeaders(),
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
 };
 
 export type Scenario = {

@@ -29,5 +29,3 @@ FROM generate_series(1, 200) AS i;
 INSERT INTO grades (student_id, course, grade)
 SELECT 's' || i, 'COURSE-' || c, 2.0 + ((i + c) % 3)
 FROM generate_series(1, 200) AS i, generate_series(1, 5) AS c;
-
-CREATE ROLE repl WITH REPLICATION LOGIN PASSWORD 'replpass';

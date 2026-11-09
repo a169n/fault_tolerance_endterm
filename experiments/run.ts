@@ -76,6 +76,9 @@ async function main(): Promise<void> {
   const mode = health.ft ? 'ft' : 'baseline';
   console.log(`  mode: ${mode.toUpperCase()}`);
 
+  // Operator reset between experiments. It runs as the superuser over `docker exec` (pg_hba.conf:
+  // local postgres trust), on purpose: resetting state is an operator action on the host, and the
+  // application role app_rw has no TRUNCATE (least privilege, Task 12). Never give app_rw this right.
   await psql("TRUNCATE payments; UPDATE students SET balance = 0;");
 
   const runId = `${name}-${mode}-${Date.now()}`;

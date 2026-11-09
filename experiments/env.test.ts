@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEnv, formatEnv, parseEnv, SECRET_KEYS } from './env.ts';
+import { buildEnv, chaosHeaders, formatEnv, parseEnv, SECRET_KEYS } from './env.ts';
 
 test('baseline: FT off, ENDTERM off, no restart, single nginx', () => {
   const e = buildEnv('baseline', {});
@@ -63,4 +63,13 @@ test('parseEnv reads KEY=VALUE, ignores comments and blank lines, strips trailin
 test('formatEnv and parseEnv round-trip', () => {
   const e = buildEnv('endterm', {});
   assert.deepEqual(parseEnv(formatEnv(e)), e);
+});
+
+test('chaosHeaders sends CHAOS_TOKEN as x-chaos-token (the endterm /chaos lockdown)', () => {
+  assert.deepEqual(chaosHeaders({ CHAOS_TOKEN: 'tok-123', JWT_SECRET: 'x' }), { 'x-chaos-token': 'tok-123' });
+});
+
+test('chaosHeaders sends no header without a token (baseline/midterm stacks keep /chaos open)', () => {
+  assert.deepEqual(chaosHeaders({}), {});
+  assert.deepEqual(chaosHeaders({ CHAOS_TOKEN: '' }), {});
 });

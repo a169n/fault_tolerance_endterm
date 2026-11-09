@@ -52,3 +52,9 @@ export function parseEnv(text: string): Record<string, string> {
 export function formatEnv(env: Record<string, string>): string {
   return Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
 }
+
+// Header for the services' /chaos endpoints. In endterm they answer only to x-chaos-token == CHAOS_TOKEN
+// (app/fault_injection.py); baseline and midterm ignore it, so sending it is harmless there.
+export function chaosHeaders(env: Record<string, string>): Record<string, string> {
+  return env.CHAOS_TOKEN ? { 'x-chaos-token': env.CHAOS_TOKEN } : {};
+}

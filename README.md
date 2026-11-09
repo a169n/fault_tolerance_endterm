@@ -101,12 +101,12 @@ After pulling schema changes, recreate the database once: `docker compose down -
 |---|---|---|
 | nginx (entry point) | 8080 | 1; `config/nginx/single.conf` (baseline, midterm) or `redundant.conf` (endterm) |
 | gateway-1 / gateway-2 | 127.0.0.1:8081 / 8082 | 2; only endterm puts gateway-2 in nginx rotation |
-| student-1 / student-2 | 3011 / 3012 | 2 replicas |
-| payment-1 / payment-2 | 3021 / 3022 | 2 replicas |
-| timetable-1 / timetable-2 | 3041 / 3042 | 2 replicas |
-| transcript-1 | 3031 | 1 |
+| student-1 / student-2 | 127.0.0.1:3011 / 3012 | 2 replicas |
+| payment-1 / payment-2 | 127.0.0.1:3021 / 3022 | 2 replicas |
+| timetable-1 / timetable-2 | 127.0.0.1:3041 / 3042 | 2 replicas |
+| transcript-1 | 127.0.0.1:3031 | 1 |
 | auth-1 | 127.0.0.1:3051 | 1; issues JWTs, reached through the gateway as `POST /auth/token` |
-| postgres-primary / postgres-replica | 55432 / 55433 | primary + hot standby |
+| postgres-primary / postgres-replica | 127.0.0.1:55432 / 55433 | primary + hot standby; password required (`scram-sha-256`) |
 | prometheus | 127.0.0.1:9090 | 1, always on (alert rules: `config/prometheus/alerts.yml`) |
 | grafana | 127.0.0.1:3000 | 1, always on (dashboard `university`) |
 | postgres-exporter | 127.0.0.1:9187 | 1, always on (`pg_up`, replication) |
@@ -127,11 +127,32 @@ client IP (1/s, burst 5) and `/api/*` per user (student 10/s burst 20, staff 5 0
 so with two gateways the cluster-wide limit is up to 2× the quota. Override a quota with
 `RATE_LIMIT_<SCOPE>_PER_S` / `RATE_LIMIT_<SCOPE>_BURST` (scope `LOGIN`, `STUDENT`, `STAFF`, `ADMIN`).
 
+Only nginx (8080) is published beyond the host; every other port is bound to `127.0.0.1`.
+
+## Database roles
+
+Every password comes from the generated, git-ignored `.env`; nothing is hard-coded
+(`config/postgres/init/00-roles.sh`, `90-grants.sql`, `pg_hba.conf`):
+
+| Role | Used by | Rights |
+|---|---|---|
+| `app_rw` | every service (`DATABASE_URL`, `DATABASE_REPLICA_URL`) | SELECT/INSERT/UPDATE on students, payments, grades, timetable_jobs, app_users; SELECT on courses, rooms; sequence USAGE. No DELETE, TRUNCATE or DDL |
+| `repl` | postgres-replica (`pg_basebackup`, streaming) | REPLICATION only |
+| `monitor` | postgres-exporter | `pg_monitor` (statistics, no table data) |
+| `postgres` | the operator, over `docker exec` only | superuser; the only `trust` line in `pg_hba.conf` is its local socket |
+
+Every network connection needs a password (`scram-sha-256`). The harness resets state between
+experiments as the superuser over `docker exec` (`experiments/run.ts`), an operator action.
+
 ## Breaking it by hand
 
-    curl -X POST localhost:3011/chaos/crash                              # application crash
-    curl -X POST localhost:3011/chaos -d '{"latencyMs":3000}'            # slow service
-    curl -X POST localhost:3021/chaos -d '{"crashAfterCheckpoint":true}' # interrupted payment
+In endterm the `/chaos*` endpoints answer only with `x-chaos-token: $CHAOS_TOKEN` (from `.env`);
+anything else is a `403` plus an audit event. Baseline and midterm ignore the header.
+
+    H="x-chaos-token: $CHAOS_TOKEN"
+    curl -X POST localhost:3011/chaos/crash -H "$H"                              # application crash
+    curl -X POST localhost:3011/chaos -H "$H" -d '{"latencyMs":3000}'            # slow service
+    curl -X POST localhost:3021/chaos -H "$H" -d '{"crashAfterCheckpoint":true}' # interrupted payment
     docker compose stop postgres-primary                                 # database failure
     docker compose kill student-1 payment-1                              # node failure
 
