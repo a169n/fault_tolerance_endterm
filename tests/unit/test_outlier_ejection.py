@@ -147,7 +147,11 @@ def _gateway_with_sick_replica(monkeypatch) -> tuple:
         return httpx.Response(200, json={"id": "s7"})
 
     monkeypatch.setattr(gateway._client, "request", fake_request)
-    return TestClient(gateway.app), hits
+    monkeypatch.setenv("JWT_SECRET", "unit-test-secret-0123456789abcdefghij")
+    from app.security import tokens
+
+    staff = {"authorization": f"Bearer {tokens.issue('bursar', 'staff', None)}"}  # endterm: authorized caller
+    return TestClient(gateway.app, headers=staff), hits
 
 
 def test_gateway_ejects_failing_replica_in_endterm(endterm: None, monkeypatch) -> None:

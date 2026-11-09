@@ -4,6 +4,9 @@ With redundant gateways, nginx re-sends a POST to the second gateway when the fi
 mid-request (`proxy_next_upstream ... non_idempotent`). If the gateway generated the key, each
 gateway would make up its own and the student would be charged twice. So in endterm the client
 must send the key; the midterm behaviour (gateway generates one) is kept for comparison.
+
+The caller is an authorized staff (or, for timetables, admin) principal, so these tests pin the key
+check itself; authorization is tested in test_gateway_authz.py.
 """
 from __future__ import annotations
 
@@ -12,6 +15,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 PAY = {"studentId": "s7", "amount": 100}
+SECRET = "unit-test-secret-0123456789abcdefghij"
+
+
+@pytest.fixture(autouse=True)
+def secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", SECRET)
 
 
 @pytest.fixture
@@ -30,10 +39,12 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> list:
     return seen
 
 
-def _client() -> TestClient:
+def _client(role: str = "staff") -> TestClient:
+    from app.security import tokens
     from app.services import gateway
 
-    return TestClient(gateway.app)  # no `with`: the lifespan (health and ejection loops) is not started
+    auth = {"authorization": f"Bearer {tokens.issue(role, role, None)}"}  # ignored outside endterm
+    return TestClient(gateway.app, headers=auth)  # no `with`: the lifespan (health and ejection loops) is not started
 
 
 def test_payment_without_idempotency_key_rejected(endterm: None, upstream: list) -> None:
@@ -71,5 +82,5 @@ def test_other_posts_need_no_key_in_endterm(endterm: None, monkeypatch: pytest.M
         return httpx.Response(202, json={"term": "2026-fall", "state": "running"})
 
     monkeypatch.setattr(gateway._client, "request", fake_request)
-    response = _client().post("/api/timetables", json={"term": "2026-fall"})
+    response = _client("admin").post("/api/timetables", json={"term": "2026-fall"})
     assert response.status_code == 202  # natural-key upsert: a re-sent POST is already harmless

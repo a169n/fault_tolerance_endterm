@@ -5,6 +5,7 @@ The DB is stubbed (``auth.find_user``): these tests pin the HTTP contract, the i
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 from typing import Dict, Optional
@@ -120,7 +121,8 @@ def test_login_log_lines_never_contain_the_password(client: TestClient) -> None:
     client.post("/token", json={"username": "bursar", "password": "right-password"},
                 headers={"authorization": "Bearer abc.def.ghi"})
     written = log_file.read_text()[start:]
-    assert '"kind": "login"' in written
+    logins = [e for e in map(json.loads, written.splitlines()) if e.get("kind") == "audit"]
+    assert [(e["action"], e["outcome"]) for e in logins] == [("login", "deny"), ("login", "allow")]  # Task 9
     assert "hunter2" not in written and "right-password" not in written
     assert "Bearer" not in written and "access_token" not in written
 

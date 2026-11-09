@@ -16,9 +16,10 @@ admin (admin), bursar (staff), s7 and s8 (students s7 and s8).
 The gateway proxies POST /auth/token here and verifies tokens itself with JWT_SECRET, so this
 service is needed only to log in: an outage blocks new logins, not existing sessions.
 
-This service owns the failed-login count: every 401 here increments
+This service owns the failed-login count and the login audit: every login, success or failure,
+writes a ``kind="audit"`` line (action ``login``), and every 401 here increments
 ``auth_denied_total{reason="invalid_credentials"}`` (AuthFailureSpike). The gateway must not count
-a 401 relayed from /auth/token a second time.
+or audit a 401 relayed from /auth/token a second time.
 """
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ from ..core import metrics
 from ..core.db import close_pools, db_healthy, open_pools, read, read_primary, to_jsonable, write
 from ..core.eventlog import ft_enabled, log
 from ..core.service import create_app
-from ..security import passwords, tokens
+from ..security import audit, passwords, tokens
 
 DEMO_USERS = (  # username, role, student_id
     ("admin", "admin", None),
@@ -117,9 +118,10 @@ async def health():
     return JSONResponse(status_code=200 if ok else 503, content={"ok": ok, "ft": ft_enabled()})
 
 
-def _deny(reason: str, username: Optional[str]) -> JSONResponse:
-    _FAILED_LOGINS.inc()
-    log(kind="login", target="token", ok=False, outcome="deny", reason=reason, user=username)
+def _deny(cause: str, username: Optional[str]) -> JSONResponse:
+    # audit.record counts the deny in auth_denied_total{reason="invalid_credentials"} (one label for
+    # every cause, so the metric does not reveal which usernames exist); the cause is in the line.
+    audit.record("login", "deny", None, "invalid_credentials", user=username, cause=cause)
     return JSONResponse(status_code=401, content=_INVALID)
 
 
@@ -147,5 +149,6 @@ async def token(request: Request):
 
     user = to_jsonable(user)
     access_token = tokens.issue(user["username"], user["role"], user["student_id"])
-    log(kind="login", target="token", ok=True, outcome="allow", user=user["username"], role=user["role"])
+    audit.record("login", "allow", tokens.Principal(user["username"], user["role"], user["student_id"]),
+                 "ok", user=user["username"])
     return {"access_token": access_token, "token_type": "bearer", "expires_in": tokens.TTL_S}

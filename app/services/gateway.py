@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from enum import Enum
@@ -19,6 +20,8 @@ from ..fault_tolerance.infrastructure import load_balancer
 from ..fault_tolerance.software import circuit_breaker, health_check, idempotency, outlier_ejection
 from ..fault_tolerance.software.degradation import StaleCache
 from ..fault_tolerance.software.retry import call
+from ..security import audit, policy, tokens
+from ..security.tokens import Principal
 
 
 def _urls(value: Optional[str]) -> List[str]:
@@ -35,6 +38,7 @@ POOLS: Dict[str, List[str]] = {  # replicas, from docker-compose.yml
 
 _client = httpx.AsyncClient(timeout=None)
 _last_good = StaleCache()
+audit.precreate()  # every deny reason exported as 0 from start-up, in every mode (ALERTS.md)
 
 
 @asynccontextmanager
@@ -101,7 +105,7 @@ async def login(request: Request):
     # The raw body is relayed whatever its content type (`curl -d` sends a form type); the auth
     # service parses it. Same retry/breaker path as the API pools. Tokens are verified here at the
     # gateway (Task 9), so an auth-1 outage blocks only new logins, not existing sessions.
-    return await proxy("auth", request, "token")
+    return await proxy("auth", request, "token", public=True)
 
 
 def _ejection_outcome(outliers: Optional[outlier_ejection.OutlierDetector]):
@@ -114,7 +118,79 @@ def _has_idempotency_key(request: Request) -> bool:
     return bool((request.headers.get("idempotency-key") or "").strip())
 
 
-async def proxy(pool: str, request: Request, path: str):
+def _bearer_principal(request: Request) -> Optional[Principal]:
+    """None without an Authorization header; raises TokenError for anything but a valid bearer token."""
+    header = request.headers.get("authorization")
+    if header is None:
+        return None
+    scheme, _, credential = header.partition(" ")
+    credential = credential.strip()
+    if scheme.lower() != "bearer" or not credential or " " in credential:
+        raise tokens.TokenError("malformed")
+    return tokens.verify(credential)
+
+
+async def _json_body(request: Request) -> Optional[dict]:
+    try:
+        body = json.loads(await request.body() or b"null")
+    except (ValueError, RecursionError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _bounded(value: object) -> Optional[str]:
+    return value if isinstance(value, str) and len(value) <= 128 else None
+
+
+def _deny(action: str, principal: Optional[Principal], status: int, reason: str) -> JSONResponse:
+    audit.record(action, "deny", principal, reason, status=status)
+    if status == 401:
+        challenge = 'Bearer realm="ftu-api"'
+        if reason != "missing_token":
+            challenge += ', error="invalid_token"'
+        return JSONResponse(status_code=401, content={"error": "unauthorized"},
+                            headers={"www-authenticate": challenge})
+    return JSONResponse(status_code=403, content={"error": "forbidden"})
+
+
+async def _enforce(pool: str, request: Request, path: str) -> Optional[JSONResponse]:
+    """The policy enforcement point (endterm only): None to proceed, or the 401/403 to return.
+
+    Fails closed: an exception while verifying the token is a 401, one while deciding a 403.
+    The Authorization header is never forwarded upstream and never logged (``proxy`` sends
+    only content-type, idempotency-key and x-request-id).
+    """
+    method = request.method
+    action = policy.route_template(method, pool, path)
+    try:
+        principal = _bearer_principal(request)
+    except tokens.TokenError as exc:
+        return _deny(action, None, 401, exc.reason)
+    except Exception:
+        return _deny(action, None, 401, "malformed")
+
+    body = await _json_body(request) if method == "POST" else None
+    try:
+        decision = policy.authorize(principal, method, pool, path, body)
+        allowed, status, reason = bool(decision.allowed), int(decision.status), str(decision.reason)
+    except Exception:
+        allowed, status, reason = False, 401 if principal is None else 403, "policy_error"
+    if not allowed or status != 200:
+        return _deny(action, principal, status if status in (401, 403) else 403, reason)
+
+    if pool == "payments" and method == "POST":  # who paid for whom, under which key (non-repudiation)
+        audit.record(action, "allow", principal, reason, student=_bounded((body or {}).get("studentId")),
+                     idempotency_key=_bounded(request.headers.get("idempotency-key")))
+    elif principal is not None and principal.role == "admin":
+        audit.record(action, "allow", principal, reason)
+    return None
+
+
+async def proxy(pool: str, request: Request, path: str, public: bool = False):
+    if not public and endterm_enabled():  # baseline and midterm stay open, for the comparison
+        denied = await _enforce(pool, request, path)
+        if denied is not None:
+            return denied
     if not POOLS.get(pool):
         return JSONResponse(status_code=404, content={"error": "unknown service"})
 
