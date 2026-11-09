@@ -9,7 +9,7 @@ mechanisms buys:
 | Mode | Switches | What it is |
 |---|---|---|
 | **baseline** | `FT_ENABLED=0`, `ENDTERM_ENABLED=0` | replicas and standby exist, but no software uses them |
-| **midterm** | `FT_ENABLED=1`, `ENDTERM_ENABLED=0` | the midterm fault-tolerant system (git tag `midterm-final`) |
+| **midterm** | `FT_ENABLED=1`, `ENDTERM_ENABLED=0` | the midterm fault-tolerant system (git tag `midterm-final` = commit `51100cf` = `origin/main`; use the commit if your clone has no tag) |
 | **endterm** | `FT_ENABLED=1`, `ENDTERM_ENABLED=1` | + redundant gateways, outlier ejection, authN/authZ, validation, rate limiting, audit, required payment `Idempotency-Key`, chaos token |
 
 Observability (correlation IDs, metrics, structured logs, Prometheus, Grafana, alert
@@ -73,6 +73,7 @@ experiments/              HOW the experiments are run (TypeScript, *.test.ts = n
 ├── metrics.ts              availability, latency, detection/recovery, key-level integrity
 ├── alerts.ts, resources.ts, acceptance.ts   alert capture, CPU/memory, pass/fail criteria
 ├── aggregate.ts            runs → reports/endterm/RESULTS.md + results.csv
+├── recovery-by-op.ts       raw logs → per-operation outage/recovery (reports/endterm/analysis/)
 ├── snapshot.ts             Grafana PNG for one run's time window
 ├── demo.ts                 live demonstration (reports/endterm/DEMO.md)
 ├── env.ts, env-file.ts     mode → .env builder (pure, tested)
@@ -81,28 +82,38 @@ experiments/              HOW the experiments are run (TypeScript, *.test.ts = n
 tests/                    unit/ (pytest, no containers), integration/ (against a live endterm stack)
 .github/workflows/ci.yml  unit, harness, config checks, pip-audit, integration
 
-logs/                     raw data. Midterm: logs/<scenario>__<mode>/. Endterm: logs/endterm/<scenario>__<mode>__r<N>/
+logs/                     raw data. Midterm: logs/<scenario>__<mode>/. Endterm: logs/endterm/<scenario>__<mode>__r<N>/ (post-review checks: logs/post-review/)
 reports/                  everything written up
 ├── REPORT.md               the midterm technical report
 ├── ARCHITECTURE.md         diagrams: endterm and midterm deployment, code layers, trust boundaries
 ├── COMPARISON.md, METHODOLOGY.md, EXPERIMENT-LOG.md, runs/   midterm results
 └── endterm/
     ├── REPORT.md             ◀ the endterm technical report (start here)
+    ├── RESULTS.md, results.csv  the aggregated campaign results (experiments/aggregate.ts)
     ├── THREAT-MODEL.md       STRIDE per trust boundary, controls, residual risks
     ├── ALERTS.md             the 6 alert rules: what, threshold, response
+    ├── OBSERVABILITY.md      one real incident detected and diagnosed end to end
     ├── TEST-PLAN.md          test levels, E1–E10 with hypotheses and acceptance criteria
     ├── DEMO.md               demonstration script
+    ├── demo/                 captured terminal transcripts of the demo rehearsals
+    ├── figures/              Grafana dashboard snapshots of five endterm runs
+    ├── analysis/             per-operation recovery from the raw logs (experiments/recovery-by-op.ts)
     ├── deps/                 first pip-audit output (pre-upgrade pins)
-    ├── security/             pip-audit before and after the PyJWT/FastAPI upgrade (REPORT.md §5.4)
+    ├── security/             pip-audit before and after the PyJWT/FastAPI upgrade (REPORT.md §5.4), check logs
     ├── post-upgrade/         post-upgrade check: 4 endterm scenarios × 1 run, outside the campaign
+    ├── post-review/          after the final-review fixes: 3 endterm scenarios × 1 run (REPORT.md §5.5)
     └── runs/<scenario>__<mode>__r<N>/metrics.json   one file per run
 ```
 
 ## Running
 
-Same commands on Windows, macOS and Linux. Needs Docker and Node.js 22.6 or newer
-(`node --version`; with nvm: `nvm use 22`). The Python tests need Python 3.12+ and
-`pip install -r requirements-dev.txt`.
+The `npm run` and `docker compose` commands are the same on Windows, macOS and Linux. Needs Docker
+and Node.js 22.6 or newer (`node --version`; with nvm: `nvm use 22`). The Python tests need
+Python 3.12+ and `pip install -r requirements-dev.txt -c constraints.txt`. `npm test` and
+`npm run test:integration` call `python3`; a standard Windows Python install has `python` or `py`
+instead, so on Windows run `python -m pytest -q tests/unit` and
+`python -m pytest -m integration -q tests/integration` directly (and `npm run test:harness` for the
+harness tests).
 
 ### Deploy one of the three modes
 
@@ -148,7 +159,9 @@ it. `docker-compose.yml` refuses to start without it (`${VAR:?}`), and
 
 CI (`.github/workflows/ci.yml`) runs the unit and harness tests, `docker compose config` for
 all three modes, the promtool and `nginx -t` checks, `pip-audit -r requirements.txt`, and the
-integration suite against a fresh endterm stack.
+integration suite against a fresh endterm stack. GitHub Actions has not run this workflow: the
+repository owner's account is locked for billing, so the jobs' commands were run locally
+(`reports/endterm/security/post-upgrade-checks.log`, `post-review-checks.log`).
 
 ### Experiments, campaign, aggregation, figures
 
@@ -207,10 +220,10 @@ The auth service issues 15-minute JWTs (HS256) through the gateway. The demo use
 
     curl -s localhost:8080/auth/token -d '{"username":"bursar","password":"'$DEMO_PASSWORD'"}'
 
-Only endterm requires the token on `/api/*` (Task 9). The gateway verifies it with
+Only endterm requires the token on `/api/*` (`app/security/policy.py`, REPORT.md §5.1). The gateway verifies it with
 `JWT_SECRET`, so an `auth-1` outage blocks new logins but not existing sessions.
 
-Endterm also rate-limits at the gateway (Task 11, `app/security/rate_limit.py`): logins per
+Endterm also rate-limits at the gateway (`app/security/rate_limit.py`): logins per
 client IP (1/s, burst 5) and `/api/*` per user (student 10/s burst 20, staff 5 000/s, admin
 1 000/s). Over quota the answer is `429` with `Retry-After`. The limits are kept **per gateway**,
 so with two gateways the cluster-wide limit is up to 2× the quota. Override a quota with
@@ -240,8 +253,9 @@ anything else is a `403` plus an audit event. Baseline and midterm ignore the he
 
     H="x-chaos-token: $CHAOS_TOKEN"
     curl -X POST localhost:3011/chaos/crash -H "$H"                              # application crash
-    curl -X POST localhost:3011/chaos -H "$H" -d '{"latencyMs":3000}'            # slow service
-    curl -X POST localhost:3021/chaos -H "$H" -d '{"crashAfterCheckpoint":true}' # interrupted payment
+    J="content-type: application/json"   # without it curl -d sends a form and /chaos answers 422
+    curl -X POST localhost:3011/chaos -H "$H" -H "$J" -d '{"latencyMs":3000}'            # slow service
+    curl -X POST localhost:3021/chaos -H "$H" -H "$J" -d '{"crashAfterCheckpoint":true}' # interrupted payment
     docker compose stop postgres-primary                                 # database failure
     docker compose kill student-1 payment-1                              # node failure
 

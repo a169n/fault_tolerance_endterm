@@ -228,3 +228,31 @@ def test_app_role_cannot_truncate(db: psycopg.Connection) -> None:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             db.execute(statement)
     assert db.execute("SELECT count(*) FROM payments").fetchone()[0] >= 0  # still there, still readable
+
+
+def test_app_role_cannot_change_users(db: psycopg.Connection) -> None:
+    """No service may promote a user or reset a password hash (90-grants.sql: no UPDATE on app_users)."""
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        db.execute("UPDATE app_users SET role = 'admin' WHERE username = 's7'")
+    assert db.execute("SELECT role FROM app_users WHERE username = 's7'").fetchone() == ("student",)
+
+
+def test_idempotency_key_of_another_student_refused(client: httpx.Client, tokens: Dict[str, str],
+                                                    db: psycopg.Connection) -> None:
+    """s8 re-uses s7's key: a 409, nothing of s7's payment in the answer, nothing charged to s8."""
+    key = _key("collide")
+    first = client.post("/api/payments", json={"studentId": "s7", "amount": 1}, headers=_auth(tokens["s7"], key))
+    assert first.status_code == 201, first.text
+    before = _balance(db, "s8")
+    other = client.post("/api/payments", json={"studentId": "s8", "amount": 1}, headers=_auth(tokens["s8"], key))
+    assert other.status_code == 409, other.text
+    assert "student_id" not in other.json() and "id" not in other.json()
+    assert _payments(db, key) == [("completed", "s7", Decimal("1.00"))]
+    assert _balance(db, "s8") == before
+
+
+@pytest.mark.parametrize("segment", ["openapi.json", "health", "metrics", "docs"])
+def test_upstream_endpoints_not_reachable_through_a_param(client: httpx.Client, tokens: Dict[str, str],
+                                                          segment: str) -> None:
+    r = client.get(f"/api/timetables/{segment}", headers=_auth(tokens["s7"]))
+    assert r.status_code == 403, (segment, r.status_code, r.text)

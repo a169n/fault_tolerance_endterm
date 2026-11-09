@@ -130,7 +130,7 @@ def no_db(monkeypatch: pytest.MonkeyPatch) -> list:
         written.append((student_id, amount))
         return None  # "duplicate": the service answers with the original response
 
-    async def original_response(key):
+    async def original_response(key, student_id=None, amount=None):
         return JSONResponse(status_code=200, content={"replayed": True})
 
     monkeypatch.setattr(payment.checkpoint_rollback, "write_checkpoint", write_checkpoint)

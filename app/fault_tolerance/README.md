@@ -18,9 +18,9 @@ because E1–E10 already name the endterm experiments (`reports/endterm/TEST-PLA
 | S2  | Timeouts                             | `[software/timeouts.py](software/timeouts.py)`                       | every wait in the system is bounded; all deadlines in one file           |
 | S3  | Circuit breaker                      | `[software/circuit_breaker.py](software/circuit_breaker.py)`         | 5 failures in a row → stop calling that service for 5 s                  |
 | S4  | Health checks                        | `[software/health_check.py](software/health_check.py)`               | gateway polls `/health/ready` every 1 s, dead replicas leave rotation    |
-| S5  | Idempotency + duplicate detection    | `[software/idempotency.py](software/idempotency.py)`                 | same Idempotency-Key twice → original result, no second charge           |
+| S5  | Idempotency + duplicate detection    | `[software/idempotency.py](software/idempotency.py)`                 | same Idempotency-Key twice → original result, no second charge; in endterm only for the same student and amount, else 409 |
 | S6  | Checkpoint + rollback / recovery     | `[software/checkpoint_rollback.py](software/checkpoint_rollback.py)` | `pending` row before the charge; a sweep rolls back what a crash left    |
-| S7  | Graceful degradation                 | `[software/degradation.py](software/degradation.py)`                 | everything failed on a read → recent stale data, HTTP 203 `degraded`     |
+| S7  | Graceful degradation                 | `[software/degradation.py](software/degradation.py)`                 | everything failed on a read → recent stale data (last 2xx, at most 10 000 paths), HTTP 203 `degraded` |
 | S8  | Fail-fast writes                     | `[software/timeouts.py](software/timeouts.py)` `DB_ACQUIRE_S`        | no primary database → write fails in ms instead of hanging               |
 | S9  | Service replication                  | see H1                                                               |                                                                          |
 | S10 | Job checkpoint + lease adoption      | `[software/job_checkpoint.py](software/job_checkpoint.py)`           | timetable job saves progress; another replica resumes it after a crash   |

@@ -77,7 +77,7 @@ async def create_payment(body: dict, request: Request):
     key = idempotency.payment_key(request.headers)                                      # 1. S5
     payment_id = await checkpoint_rollback.write_checkpoint(key, student_id, amount)    # 2. S6
     if payment_id is None:
-        return await idempotency.original_response(key)                                 # duplicate: S5
+        return await idempotency.original_response(key, student_id, amount)             # duplicate: S5
 
     if fault_injection.config["crashAfterCheckpoint"]:  # txn-interrupt experiment
         log(kind="chaos", action="crash_after_checkpoint", paymentId=str(payment_id))

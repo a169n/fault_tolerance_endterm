@@ -2,7 +2,7 @@
 
 This plan covers how the resilient university information system is tested, from pure unit tests up
 to full system fault-injection and security experiments. It is the reference for the experiment
-campaign (Task 17) and the report (Task 19).
+campaign (REPORT.md §7, §8) and the report ([`REPORT.md`](REPORT.md)).
 
 Three deployable modes are tested the same way, so results are comparable:
 
@@ -23,9 +23,9 @@ chaos token) is gated by `ENDTERM_ENABLED`.
 | Level | What it checks | Where | Run with |
 |---|---|---|---|
 | Unit (Python) | Pure logic of each mechanism and security control, with upstreams stubbed or monkeypatched. No containers. | `tests/unit/**` (20 files) | `python3 -m pytest -q tests/unit` |
-| Unit (harness) | Pure logic of the experiment harness: metrics, acceptance evaluation, alert folding, the mode→`.env` builder, and the security attack/abuse generators and verdicts. No containers. | `experiments/*.test.ts` (6 files) | `npm run test:harness` |
-| Config | The alert rules, Prometheus config and nginx configs are valid. | `config/prometheus/alerts.test.yml`, `promtool`, `nginx -t` | `npm run test:alerts` (+ Task 16 CI `config` job) |
-| Integration | The real endterm stack end to end: login, idempotent payment, authorization, validation, correlation-ID propagation, least privilege. Skips unless `GET /health` reports `mode == "endterm"`. | `tests/integration/test_stack.py` (Task 16) | `pytest -m integration -q` |
+| Unit (harness) | Pure logic of the experiment harness: metrics, acceptance evaluation, alert folding, resource sampling, the mode→`.env` builder, the security attack/abuse generators and verdicts, aggregation, snapshot, demo and the per-operation recovery analysis. No containers. | `experiments/*.test.ts` (11 files) | `npm run test:harness` |
+| Config | The alert rules, Prometheus config and nginx configs are valid. | `config/prometheus/alerts.test.yml`, `promtool`, `nginx -t` | `npm run test:alerts` (+ the CI `config` job in `.github/workflows/ci.yml`) |
+| Integration | The real endterm stack end to end: login, idempotent payment, an `Idempotency-Key` re-used by another student refused, authorization, reserved upstream paths denied, validation, correlation-ID propagation, least privilege (no TRUNCATE, no UPDATE on `app_users`). Skips unless `GET /health` reports `mode == "endterm"`. | `tests/integration/test_stack.py` | `pytest -m integration -q` |
 | System / fault injection | The whole stack under 10 fault, monitoring and security scenarios, with acceptance criteria, 3 repetitions per mode. | `experiments/scenarios.ts`, `run.ts`, `campaign.ts` | `npm run exp <scenario> -- --rep N`, `npm run campaign -- --reps 3` |
 
 ### Unit suites and what they cover
@@ -209,7 +209,7 @@ baseline and midterm are expected to miss several and are reported for compariso
   workload stays available.
 - **Inject:** during the workload, the abuse script below. **Repair:** none.
 - **Abuse script (`experiments/attacks.ts` `abuseSet` / `burstSet` / `bruteForceSet`):**
-  - 200 malformed payments: the 20 seeds of the Task 10 rejection list, 10 sends each, every body
+  - 200 malformed payments: the 20 seeds of the validation rejection list (`experiments/attacks.ts`), 10 sends each, every body
     exactly as written (only the two extra-field seeds carry a field beyond `studentId`/`amount`, so
     each seed is rejected for its own reason), plus invalid JSON, a 1 MiB body and a bad path segment
     (all with the staff token: the body, not the policy, is what is wrong)
@@ -265,5 +265,5 @@ kept) confirmed the new count: 41 attacker payments in the DB (every payment att
 forged, expired, `alg:none` and s7-for-s8 succeeded), none of them with an `attack-` key, so the old
 key-only count would have read 0; `attacker-payments-in-db-eq-0` failed as it should (2/6).
 
-`--rep 0` is a smoke run and is not part of the 3-repetition campaign (Task 17). The numbers above are
+`--rep 0` is a smoke run and is not part of the 3-repetition campaign (REPORT.md §7.6). The numbers above are
 single observations, kept for provenance alongside each run's `metrics.json`.

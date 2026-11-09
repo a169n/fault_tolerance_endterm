@@ -50,3 +50,31 @@ def test_stale_cache_expires(ft: None, clock: Clock) -> None:
 
 def test_stale_cache_miss(ft: None, clock: Clock) -> None:
     assert StaleCache().fallback("students/nobody", "student") is None
+
+
+def test_stale_cache_never_stores_a_non_2xx(ft: None, clock: Clock) -> None:
+    cache = StaleCache()
+    cache.remember("timetables/nope", {"error": "not found"}, 404)
+    assert len(cache) == 0
+    assert cache.fallback("timetables/nope", "timetable") is None
+
+
+def test_stale_cache_is_bounded_lru(ft: None, clock: Clock) -> None:
+    cache = StaleCache(max_entries=3)
+    for i in range(5):
+        cache.remember(f"timetables/t{i}", {"i": i})
+    assert len(cache) == 3
+    assert cache.fallback("timetables/t0", "timetable") is None   # evicted, oldest first
+    assert cache.fallback("timetables/t4", "timetable") is not None
+    cache.remember("timetables/t2", {"i": 2})                     # refreshed: now the newest
+    cache.remember("timetables/t5", {"i": 5})
+    assert cache.fallback("timetables/t3", "timetable") is None
+    assert cache.fallback("timetables/t2", "timetable") is not None
+
+
+def test_stale_cache_drops_an_expired_entry(ft: None, clock: Clock) -> None:
+    cache = StaleCache()
+    cache.remember("students/s1", {"id": "s1"})
+    clock.t += degradation.STALE_MAX_MS / 1000
+    assert cache.fallback("students/s1", "student") is None
+    assert len(cache) == 0

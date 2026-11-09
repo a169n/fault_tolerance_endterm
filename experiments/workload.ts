@@ -62,9 +62,13 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
   const windowOver = new AbortController();
   const stopTimer = setTimeout(() => windowOver.abort(), durationMs);
 
-  async function once(op: string, intent?: string, retry = false): Promise<void> {
+  const randomStudent = (): string => `s${1 + Math.floor(Math.random() * 200)}`;
+
+  // `student` is fixed per payment intent: a client re-send of an intent repeats the same request body
+  // under the same Idempotency-Key. (Up to the endterm campaign the re-send drew a new student; the
+  // endterm payment service now answers a key re-used for a different payment with 409, REPORT.md §5.5.)
+  async function once(op: string, intent?: string, retry = false, student: string = randomStudent()): Promise<void> {
     const started = Date.now();
-    const student = `s${1 + Math.floor(Math.random() * 200)}`;
     let url = `${gateway}/api/students/${student}`;
     const signal = AbortSignal.any([AbortSignal.timeout(clientTimeoutMs), windowOver.signal]);
     const rid = `${runId}-${requestCounter++}`;
@@ -114,8 +118,9 @@ export async function runWorkload(opts: WorkloadOpts): Promise<Rec[]> {
       const op = pickOp();
       if (op === 'payments') {
         const intent = `${runId}-${intentCounter++}`;
-        await once(op, intent, false);
-        if (Math.random() < 0.2) await once(op, intent, true);
+        const student = randomStudent();
+        await once(op, intent, false, student);
+        if (Math.random() < 0.2) await once(op, intent, true, student);
       } else {
         await once(op);
       }

@@ -311,7 +311,7 @@ async def proxy(pool: str, request: Request, path: str, public: bool = False):
         if attempts > 1:
             log(kind="recovery", target=pool, action="retry_succeeded", attempts=attempts)
         if method == "GET":
-            _last_good.remember(stale_key, payload)
+            _last_good.remember(stale_key, payload, status)
         return JSONResponse(status_code=status, content=payload)
     except Exception as exc:
         stale = _last_good.fallback(stale_key, pool) if method == "GET" else None   # S7

@@ -12,6 +12,11 @@ GRANT CONNECT ON DATABASE university TO app_rw, monitor;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO app_rw;
 
-GRANT SELECT, INSERT, UPDATE ON students, payments, grades, timetable_jobs, app_users TO app_rw;
+GRANT SELECT, INSERT, UPDATE ON students, payments, grades, timetable_jobs TO app_rw;
+-- app_users: the auth service only reads it and seeds the demo users (INSERT ... ON CONFLICT DO
+-- NOTHING). No UPDATE, so no service can change an existing user's role or password hash. Every
+-- service still shares app_rw, so one could INSERT a new user; per-service roles are residual risk
+-- R16 (THREAT-MODEL.md §10).
+GRANT SELECT, INSERT ON app_users TO app_rw;
 GRANT SELECT ON courses, rooms TO app_rw;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app_rw;   -- payments.id (BIGSERIAL): nextval only

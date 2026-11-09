@@ -22,7 +22,9 @@ The midterm project built a small university platform (students, payments, trans
 twice from one image: a **baseline** with no fault-tolerance logic and a **fault-tolerant** version
 (`FT_ENABLED=1`). It injected six faults into each and measured the difference
 ([`reports/REPORT.md`](../REPORT.md), [`reports/COMPARISON.md`](../COMPARISON.md)). The midterm
-submission is frozen at git tag `midterm-final` (commit `51100cf`).
+submission is frozen at git tag `midterm-final` (commit `51100cf`, which is also `origin/main`). The tag
+could not be pushed from the environment in which this work was done, so a fresh clone may not have it:
+there, use `51100cf` or `origin/main` wherever this report names `midterm-final`.
 
 The endterm extends that system. It does not replace it (spec §4). The same four business services,
 the same payment workflow (idempotency key, checkpoint before the charge, rollback sweep), the same
@@ -62,8 +64,8 @@ instruments, and only the mechanisms under test differ.
 
 ### 1.2 Major changes since `midterm-final`
 
-Taken from `git log midterm-final..HEAD`. Every change is described in more detail in the section
-named in the last column.
+Taken from `git log midterm-final..HEAD` (in a fresh clone without the tag: `git log 51100cf..HEAD`).
+Every change is described in more detail in the section named in the last column.
 
 | Commit(s) | Change | Section |
 |---|---|---|
@@ -92,6 +94,9 @@ named in the last column.
 | `d9c9e84` | this report: design sections, architecture and run instructions | — |
 | `3f8c9a9` | Grafana snapshots and the end-to-end incident walkthrough ([`OBSERVABILITY.md`](OBSERVABILITY.md)) | 4.7, 8.7 |
 | `f01eb1b` | rehearsed demonstration with captured transcripts (`reports/endterm/demo/`) | 7.7 |
+| `21ed9a1` | this report: results, discussion and conclusion | 8, 9, 10 |
+| `e15617b` | dependency upgrade (PyJWT, FastAPI/Starlette) after `pip-audit`, with the post-upgrade check | 5.4 |
+| the commit "fix: address final endterm review" (after `e15617b`) | payment idempotency key scoped to the same payment, reserved upstream paths denied by the policy, bounded stale cache, no `UPDATE` on `app_users` for `app_rw`, constraints file; per-operation recovery analysis; report corrections | 5.5, 8.2, 8.5 |
 
 What did **not** change: the business services and their APIs, the payment workflow, the business
 tables of the database schema (new: `app_users` for the auth service), the midterm mechanisms S1 to
@@ -103,7 +108,8 @@ requires.
 ### 1.3 Requirement → where implemented → evidence
 
 This table covers every bullet of spec §§3, 4, 5, 6, 7 and 9. Experiment evidence names the scenario
-and its endterm verdict from §8.1 (all endterm verdicts are PASS over 3 repetitions); the numbers are
+and its endterm verdict from §8.1 (all ten endterm scenario verdicts are PASS over 3 repetitions; one
+of this report's own requirements, DR7, is nevertheless not met in E2, see §8.1); the numbers are
 in §8. Spec §4 is respected: no mechanism is claimed to work on the strength of a diagram alone.
 
 **Spec §3 — Cloud computing and microservices resilience**
@@ -133,7 +139,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Correlation/request IDs | `app/core/context.py`; nginx sets `X-Request-ID`, the gateway forwards it, every log line carries `rid` | `test_context.py` (incl. `test_hostile_request_id_replaced`), `test_request_id_propagates_to_payment_service_log` |
 | Dashboards | Grafana dashboard `university` (`config/grafana/dashboards/university.json`) | §4.4; snapshots of five endterm runs in `reports/endterm/figures/` (§8.7) |
 | Alert rules | six rules in `config/prometheus/alerts.yml` | `alerts.test.yml` (`npm run test:alerts`); [`ALERTS.md`](ALERTS.md) |
-| Detection and recovery times | `experiments/metrics.ts` (`detectionMs`, `recoveryMs`), `experiments/alerts.ts` (per-alert `detectionMs`) | §4.6; measured in §8.2 and §8.3 (with the window-close caveat of §8.4) |
+| Detection and recovery times | `experiments/metrics.ts` (`detectionMs`, `recoveryMs`), `experiments/alerts.ts` (per-alert `detectionMs`); per-operation recovery from the raw logs in `experiments/recovery-by-op.ts` | §4.6; measured in §8.2 and §8.3 (with the window-close caveat of §8.4); write-path recovery in §8.2 from [`analysis/recovery-by-op.md`](analysis/recovery-by-op.md) |
 | Evidence: explanation of how an incident is detected and diagnosed | §4.7; [`OBSERVABILITY.md`](OBSERVABILITY.md) (one real incident, end to end) | — |
 
 **Spec §3 — Security, resilience and intrusion tolerance**
@@ -146,7 +152,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Rate limiting or abuse protection | `app/security/rate_limit.py` | `test_rate_limit.py`; E10 PASS (burst and brute force limited), E6 PASS (0 legitimate requests limited) (§8.5) |
 | Audit logging | `app/security/audit.py` | `test_audit.py` (`test_audit_event_has_no_secrets`); E9 PASS: 63 audit deny events per run (§8.5) |
 | Safe failure behaviour | fail-closed policy, 4xx (not 5xx) for bad input, an auth outage degrades only logins | `test_policy_fails_closed_on_exception`; E9, E10 PASS (§8.5) |
-| Least privilege | `app_rw` (no DELETE/TRUNCATE/DDL), `repl`, `monitor`; loopback-only ports | `test_app_role_cannot_truncate` |
+| Least privilege | `app_rw` (no DELETE/TRUNCATE/DDL, no UPDATE on `app_users`), `repl`, `monitor`; loopback-only ports | `test_app_role_cannot_truncate`, `test_app_role_cannot_change_users`; one role shared by all services and containers running as root are residual risks R15, R16 (THREAT-MODEL.md §10) |
 | Evidence: threat model | [`THREAT-MODEL.md`](THREAT-MODEL.md) | — |
 | Evidence: implemented controls | §5; THREAT-MODEL.md §6 | — |
 | Evidence: controlled tests of ≥ 2 security or misuse scenarios | E9 `unauthorized-access`, E10 `abuse` | §8.5; both PASS in endterm, FAIL in baseline and midterm |
@@ -173,7 +179,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Reuse the midterm services and core workflow | same services and payment workflow | §1.2 |
 | Document major changes | §1.2; ARCHITECTURE.md §6 | — |
 | ≥ 3 services including a data store | 6 services + PostgreSQL primary/standby | ARCHITECTURE.md §4 |
-| Retain a baseline/midterm configuration | `npm run up:baseline`, `npm run up:midterm`, tag `midterm-final` | §1.1 |
+| Retain a baseline/midterm configuration | `npm run up:baseline`, `npm run up:midterm`, tag `midterm-final` (commit `51100cf` = `origin/main`) | §1.1 |
 | Do not claim a mechanism works from a diagram | every mechanism has a test or an experiment; the experiment results are in §8 | this table |
 | Synthetic data, authorised systems only | seed data in `config/postgres/`; tests only against the local stack | THREAT-MODEL.md "Scope of testing" |
 
@@ -197,7 +203,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Restore a known state between experiments | `experiments/run.ts` restore (containers, chaos, DB, health, replication, no firing alert) | §7.3; `restore` in every `metrics.json` |
 | Service/instance failure | E1 app-crash, E4 node-failure, E7 gateway-failure | §8.5: PASS in endterm |
 | Dependency timeout | E3 net-timeout (slow service), E2 db-failure (database) | §8.5: PASS in endterm |
-| Load spike | E6 high-load (10 → 110 workers) | §8.5: PASS in every mode; weak test (§8.4 item 5) |
+| Load spike | E6 high-load (10 → 110 workers) | §8.5: PASS in every mode; weak test (§8.4 item 5); resource use per container in §8.2 |
 | Monitoring/alert test | E8 error-spike; every scenario's expected alerts | §8.3 |
 | Unauthorized access | E9 unauthorized-access | §8.5: PASS in endterm |
 | Abusive or malformed requests | E10 abuse | §8.5: PASS in endterm |
@@ -209,7 +215,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Requirement | Where implemented | Evidence |
 |---|---|---|
 | Success/failure counts, error rate, avg and p95 latency | `experiments/metrics.ts` from `workload.jsonl` | §8.2 |
-| Detection time and recovery time | `detectionMs`, `recoveryMs`, per-alert `detectionMs` | §8.2, §8.3 |
+| Detection time and recovery time | `detectionMs`, `recoveryMs`, per-alert `detectionMs`; per-operation (write-path) recovery from the raw logs (`experiments/recovery-by-op.ts`) | §8.2, §8.3; [`analysis/recovery-by-op.md`](analysis/recovery-by-op.md) |
 | Availability over the test interval | request-based, time-based (1 s bins), read availability | §8.2 |
 | Alerts triggered and whether each was correct | `experiments/alerts.ts`, `acceptance.ts` (`mustFire`, `mayFire`, unexpected) | §8.3 |
 | Data integrity: missing or duplicate records | key-level integrity (duplicate charges, lost records, orphaned pending, ledger balance) | §8.2 |
@@ -243,20 +249,22 @@ exchanges a username and password for a JWT, and four demo users with roles: `ad
 
 Each requirement is written so that an experiment or a test can check it. The thresholds are the
 endterm acceptance criteria in [`TEST-PLAN.md`](TEST-PLAN.md); baseline and midterm are expected to
-miss several of them, and that is reported as a comparison, not as a failure.
+miss several of them, and that is reported as a comparison, not as a failure. They are numbered DR1 to
+DR10 (dependability requirement), so that they are not confused with the residual risks R1 to R16 of
+THREAT-MODEL.md §10. Whether the endterm meets each one is in §8.1.
 
 | # | Requirement | Checked by |
 |---|---|---|
-| R1 | A crashed or killed service replica must keep request availability ≥ 99.9 %, with no lost or duplicate payment | E1, E4 |
-| R2 | The gateway must not be a single point of failure (availability ≥ 99.5 % when one gateway is killed, no double charge) | E7 |
-| R3 | A slow replica must be taken out of rotation, so that goodput during the fault stays ≥ 70 % of the pre-fault level and p95 stays ≤ 1 s | E3 |
-| R4 | With the DB primary down, reads must stay ≥ 99 % available and the outage must be alerted within 10 s | E2 |
-| R5 | An interrupted payment must leave no duplicate, lost or orphaned record, and the ledger must balance | E5 |
-| R6 | At the 110-worker peak, error rate ≤ 1 %, p95 ≤ 1 s, and the legitimate workload must never be rate-limited | E6 |
-| R7 | Each incident class of the alert table must be detected by its alert, with no unexpected alert | E2, E4, E7, E8, E9, E10 |
-| R8 | Every unauthenticated or over-privileged request must be denied (401/403) and audited, with no data exposed or changed | E9 |
-| R9 | Malformed input must be answered with a 4xx, never a 5xx; floods and brute force must be rate-limited; no instance may crash | E10 |
-| R10 | Every request must be traceable across all hops by one correlation ID that cannot be used for log injection | unit and integration tests |
+| DR1 | A crashed or killed service replica must keep request availability ≥ 99.9 %, with no lost or duplicate payment | E1, E4 |
+| DR2 | The gateway must not be a single point of failure (availability ≥ 99.5 % when one gateway is killed, no double charge) | E7 |
+| DR3 | A slow replica must be taken out of rotation, so that goodput during the fault stays ≥ 70 % of the pre-fault level and p95 stays ≤ 1 s | E3 |
+| DR4 | With the DB primary down, reads must stay ≥ 99 % available and the outage must be alerted within 10 s | E2 |
+| DR5 | An interrupted payment must leave no duplicate, lost or orphaned record, and the ledger must balance | E5 |
+| DR6 | At the 110-worker peak, error rate ≤ 1 %, p95 ≤ 1 s, and the legitimate workload must never be rate-limited | E6 |
+| DR7 | Each incident class of the alert table must be detected by its alert, with no unexpected alert | E2, E4, E7, E8, E9, E10 |
+| DR8 | Every unauthenticated or over-privileged request must be denied (401/403) and audited, with no data exposed or changed | E9 |
+| DR9 | Malformed input must be answered with a 4xx, never a 5xx; floods and brute force must be rate-limited; no instance may crash | E10 |
+| DR10 | Every request must be traceable across all hops by one correlation ID that cannot be used for log injection | unit and integration tests |
 
 ### 2.3 Assumptions
 
@@ -285,10 +293,11 @@ boundaries of the data-flow diagram (also drawn in [`ARCHITECTURE.md`](../ARCHIT
 
 Actors in scope: anonymous clients, authenticated students trying to exceed their rights, a stolen
 student token (bounded by its 900 s lifetime and the student's own rights), and faulty components.
-Out of scope: a malicious insider with root on the host. THREAT-MODEL.md §10 lists fourteen residual
+Out of scope: a malicious insider with root on the host. THREAT-MODEL.md §10 lists sixteen residual
 risks the design accepts, among them no mTLS between services (R1), per-gateway rate-limit state (R2),
-no token revocation (R3), one shared HS256 key (R5), an audit log that is not tamper-evident (R6) and
-no TLS on the public listener (R7).
+no token revocation (R3), one shared HS256 key (R5), an audit log that is not tamper-evident (R6),
+no TLS on the public listener (R7), containers that run as root (R15) and one database role shared by
+every service (R16).
 
 ---
 
@@ -525,7 +534,11 @@ These are computed for every run by `experiments/metrics.ts` and `experiments/al
 - **Alert detection time** (per-alert `detectionMs`): from the injection to the first Prometheus poll
   (every 1 s, `/api/v1/alerts`) that shows the alert firing.
 - **Recovery time** (`recoveryMs`): from the injection to the end of the first outage after it. Time is
-  cut into 1 s bins; a bin in which no request succeeded is down.
+  cut into 1 s bins; a bin in which no request succeeded is down. Because a bin counts as up when any
+  operation succeeds, this cannot see an outage of one operation (payment writes) while reads succeed.
+  **Per-operation recovery** is therefore derived afterwards from the raw logs by
+  `experiments/recovery-by-op.ts`: for each operation, the first successful request sent after its last
+  failed one (§8.2).
 - **Availability:** request-based (successful / all requests), time-based (up bins / non-idle bins),
   and, for E2, read availability (GETs only), because writes are designed to fail fast while the
   primary is down.
@@ -564,9 +577,9 @@ where the attacks are expected to succeed, and that outcome is recorded as measu
 | Audit logging | `app/security/audit.py`: a `kind="audit"` line with `rid`, `sub`, `role`, action, outcome and reason for every deny, every payment allow, every admin action and every login; never a password, a token or the `Authorization` header | B1.R1, B1.I3 | `test_audit_event_has_no_secrets`; E9 (audit events ≥ attempts) |
 | Input validation and request limits | pydantic models with `extra='forbid'`, patterns and ranges (amount, `studentId`, names) → 422; at the gateway, body > 16 384 bytes → 413, non-JSON POST → 400, unsafe path segment → 400; all SQL parameterised | B1.T1, B1.T2, B1.D2, B4.T1 | `test_payment_rejects[*]`, `test_gateway_rejects_*`, `test_malformed_payment_422_not_5xx`; E10 |
 | Rate limiting | token buckets in `app/security/rate_limit.py`: logins 1/s burst 5 per client IP; `/api/*` per user: student 10/s burst 20, staff 5 000/s, admin 1 000/s → 429 with `Retry-After` | B1.S3, B1.D1 | `test_bucket_*`, `test_login_bruteforce_limited_after_5`, `test_staff_quota_absorbs_high_load_peak` (Review Focus 1); E10, E6 (`rateLimited = 0`) |
-| Duplicate-request protection | client `Idempotency-Key` required on payments; `payments.idempotency_key UNIQUE`; checkpoint and rollback (S5, S6, every FT mode) | B1.T4, B2.T1, B4.T3 | `test_payment_without_idempotency_key_rejected`, `test_payment_idempotent_end_to_end`; E5, E7 |
+| Duplicate-request protection | client `Idempotency-Key` required on payments; `payments.idempotency_key UNIQUE`; checkpoint and rollback (S5, S6, every FT mode); in endterm a re-used key returns the stored payment only if it is the same student and amount, otherwise 409 (§5.5) | B1.T4, B1.I1, B2.T1, B4.T3 | `test_payment_without_idempotency_key_rejected`, `test_payment_idempotent_end_to_end`, `test_other_students_key_refused_in_endterm`, `test_idempotency_key_of_another_student_refused`; E5, E7 |
 | Secrets handling (every mode) | secrets generated per install (24 random bytes) into a git-ignored `.env`; compose refuses to start without them (`${VAR:?}`); no password in the repository | B4.I1, B5.I1 | `experiments/env.test.ts` |
-| Least privilege (every mode) | `app_rw`: SELECT/INSERT/UPDATE on business tables only, no DELETE, TRUNCATE or DDL; `repl`: replication only; `monitor`: `pg_monitor` only; `scram-sha-256` on every network line; every port except nginx `:8080` bound to `127.0.0.1` | B4.S1, B4.T2, B5.I2 | `test_app_role_cannot_truncate` |
+| Least privilege (every mode) | `app_rw`: SELECT/INSERT/UPDATE on business tables only, SELECT/INSERT on `app_users`, no DELETE, TRUNCATE or DDL; `repl`: replication only; `monitor`: `pg_monitor` only; `scram-sha-256` on every network line; every port except nginx `:8080` bound to `127.0.0.1` | B4.S1, B4.T2, B5.I2 | `test_app_role_cannot_truncate`, `test_app_role_cannot_change_users` |
 | Chaos-endpoint lockdown | `/chaos*` needs `x-chaos-token == CHAOS_TOKEN` (constant-time compare), else 403 and an audit event; nginx answers 404 for `/chaos*` and `/metrics` | B1.I2, B3.E1 | `test_chaos_requires_token_in_endterm`, `test_chaos_token_compare_constant_time`, `test_chaos_open_in_midterm` |
 | Log-injection-safe correlation IDs (every mode) | §4.2 | B1.T3 | `test_hostile_request_id_replaced` |
 | Dependency and configuration checks | CI: `pip-audit -r requirements.txt`, `docker compose config` for all three modes, `promtool`, `nginx -t` | B5.T1 | CI jobs `config` and `deps`; §5.4 |
@@ -664,6 +677,51 @@ here (`pip freeze`, then `pip-audit --no-deps`) found 6 advisories for `pip 25.0
 the `python:3.12-slim` base image ([`security/pip-audit-image-gateway.json`](security/pip-audit-image-gateway.json)).
 pip is not used by the services at run time; it is listed as a limitation (§9.2).
 
+### 5.5 Changes after the campaign (final review)
+
+A review of the finished system found four defects in the code and one reproducibility gap. They were
+fixed after the campaign and after the §5.4 upgrade:
+
+| Defect | Fix | Tests |
+|---|---|---|
+| The `Idempotency-Key` duplicate path was not scoped to the caller. A student who sent a payment for themselves with another student's key got that student's stored payment back with a 2xx (a read that the policy reserves for staff), and their own payment was silently not made | In endterm, `idempotency.original_response` returns the stored row only if it has the same `student_id` and amount; otherwise 409 `Idempotency-Key already used for a different payment`, with nothing of the stored row. The lookup reads the primary. Baseline and midterm are unchanged | `test_other_students_key_refused_in_endterm`, `test_same_student_different_amount_refused_in_endterm`, `test_same_payment_replayed_in_endterm`, `test_midterm_duplicate_path_unchanged`; integration `test_idempotency_key_of_another_student_refused` |
+| A route with a `{param}` segment forwarded the segment to the service as its path, so a student could reach a service's own `/openapi.json` or `/health` as `/api/timetables/openapi.json` | The policy treats `health`, `metrics`, `chaos`, `docs`, `redoc` and `openapi.json` in the parameter position as an unlisted route (403 `no_rule`) | `test_routes_outside_the_matrix_are_denied` (7 new cases); integration `test_upstream_endpoints_not_reachable_through_a_param` |
+| The gateway's stale cache (S7) kept every distinct GET path that answered below 500, 404s included, for the life of the process | Only 2xx answers are stored; at most `STALE_MAX_ENTRIES` (10 000) entries, least recently stored evicted first; an expired entry is dropped when it is found | `test_stale_cache_never_stores_a_non_2xx`, `test_stale_cache_is_bounded_lru`, `test_stale_cache_drops_an_expired_entry` |
+| `app_rw`, which every service uses, could `UPDATE app_users`, so any compromised service could make a user an admin | `90-grants.sql` grants only SELECT and INSERT on `app_users` (the auth service reads it and seeds it with `ON CONFLICT DO NOTHING`). Per-service roles remain residual risk R16 | integration `test_app_role_cannot_change_users` |
+| Only direct dependencies were pinned: the host had `pydantic` 2.13.5 and the image 2.14.3 (`security/post-upgrade-checks.log`) | `constraints.txt` pins every installed package of the built image; the Dockerfile and CI install with `-c constraints.txt` | the rebuilt image's `pip freeze` equals `constraints.txt` |
+
+**A harness defect found by the first fix.** The workload's client re-send of a payment intent
+(20 % of intents, same `Idempotency-Key`) drew a **new random student** for the re-sent body
+(`experiments/workload.ts` up to this change). Up to and including the campaign, the service answered
+such a re-send with the stored payment (200), so it counted as a successful, de-duplicated re-send.
+Under the fixed service it would be a 409. The workload now re-sends the same body, which is what a
+re-send of one intent means. The campaign's conclusions about duplicates do not depend on this: a
+re-send was still one intent sent twice under one key, and the key-level checks of §7.4 compare keys,
+not students.
+
+**Verification.** Python unit tests: 409 passed. Harness tests: 95 passed (including the new
+`recovery-by-op.test.ts`). Alert rule tests: passed. The CI `config` job's commands (`docker compose
+config` for the three modes, `promtool check config`, `nginx -t`): passed. Integration tests against
+an endterm stack started from a fresh volume (`docker compose down -v`, then `npm run up:endterm`):
+17 passed. The output is in [`security/post-review-checks.log`](security/post-review-checks.log).
+`requirements.txt` did not change, so the `deps` job's result is still
+[`security/pip-audit-after.json`](security/pip-audit-after.json). One repetition each of the three
+endterm scenarios that exercise the duplicate path most (E5: re-sends after a crash mid-payment; E7:
+nginx re-sends to the second gateway; E9: attacker payments), on the fixed code and the fixed
+workload, kept apart from the campaign in `reports/endterm/post-review/<scenario>__endterm__r0/metrics.json`
+(raw data in `logs/post-review/`):
+
+| Scenario | Acceptance | Failed / total | Alerts | Integrity | Payment re-sends |
+|---|---|---|---|---|---|
+| `txn-interrupt` (E5) | 4/4 pass | 15 / 11 894 | none, correct | 0 duplicate, 0 lost, 0 orphaned, ledger balanced | 457 × 200, 1 × 201, 2 × 503; no 409 |
+| `gateway-failure` (E7) | 3/3 pass | 0 / 11 395 | `InstanceDown`, correct | 0 duplicate, 0 lost, 0 orphaned, ledger balanced | 413 × 200; no 409 |
+| `unauthorized-access` (E9) | 6/6 pass | 0 / 11 619 | `AuthFailureSpike`, correct | 0 duplicate, 0 lost, 0 orphaned, ledger balanced; 63 of 63 attacks denied, 63 audit denies | 438 × 200; no 409 |
+
+**Scope of this evidence.** The 90-run campaign of §8 measured the code before these fixes, as it
+measured the pins before §5.4. The three runs above are one repetition each, in the endterm mode only;
+they show that the fixes did not break those scenarios, nothing more. The stale-cache change also
+applies to the midterm mode, where it was not re-run.
+
 ---
 
 ## 6. Verification and validation plan
@@ -673,9 +731,9 @@ The full plan is [`TEST-PLAN.md`](TEST-PLAN.md). Summary:
 | Level | What it checks | Where | Command |
 |---|---|---|---|
 | Unit (Python) | each mechanism and each security control in isolation, upstreams stubbed, no containers | `tests/unit/` (20 files) | `python3 -m pytest -q tests/unit` |
-| Unit (harness) | metrics, acceptance evaluation, alert folding, attack generators and verdicts, mode → `.env`, aggregation, snapshot, demo | `experiments/*.test.ts` | `npm run test:harness` |
+| Unit (harness) | metrics, acceptance evaluation, alert folding, attack generators and verdicts, mode → `.env`, aggregation, snapshot, demo, per-operation recovery | `experiments/*.test.ts` (11 files) | `npm run test:harness` |
 | Configuration | alert rules (promtool unit tests), Prometheus config, nginx configs, compose for all three modes | `config/prometheus/alerts.test.yml`, CI `config` job | `npm run test:alerts` |
-| Integration | the live endterm stack: login and own-record read, idempotent payment end to end, unauthorized payment denied with the DB unchanged, malformed payment 422 not 5xx, the correlation ID reaches the payment service's log, `app_rw` cannot truncate | `tests/integration/test_stack.py` | `npm run test:integration` (skips unless the stack reports `mode == "endterm"`) |
+| Integration | the live endterm stack: login and own-record read, idempotent payment end to end, another student's `Idempotency-Key` refused (409), unauthorized payment denied with the DB unchanged, malformed payment 422 not 5xx, reserved upstream paths denied, the correlation ID reaches the payment service's log, `app_rw` cannot truncate or change `app_users` | `tests/integration/test_stack.py` | `npm run test:integration` (skips unless the stack reports `mode == "endterm"`) |
 | System / fault injection | ten scenarios with acceptance criteria, three repetitions per mode, three modes | `experiments/scenarios.ts`, `run.ts`, `campaign.ts` | `npm run campaign -- --reps 3` |
 | Dependencies | known vulnerabilities in the pinned Python dependencies (none after the §5.4 upgrade) | CI `deps` job | `pip-audit -r requirements.txt` |
 
@@ -709,7 +767,7 @@ findings in the job summary) and `integration` (a fresh endterm stack, then `pyt
 | E3 | `net-timeout` | fault | student-1 `latencyMs: 3000` | reset to 0 | — |
 | E4 | `node-failure` | fault | `docker compose kill student-1 payment-1` | `docker compose start student-1 payment-1` | `InstanceDown` |
 | E5 | `txn-interrupt` | fault | `crashAfterCheckpoint: true` on both payment replicas | `docker compose start payment-1 payment-2` | — |
-| E6 | `high-load` | abnormal load | +100 workers (10 → 110) | the ramp ends | — |
+| E6 | `high-load` | abnormal load | +100 workers (10 → 110) | none: the 110 workers run to the end of the window | — |
 | E7 | `gateway-failure` | fault (new) | `docker compose kill gateway-1` | `docker compose start gateway-1` | `InstanceDown` |
 | E8 | `error-spike` | monitoring (new) | `failRate: 1.0` on both student and both payment replicas | reset | `HighErrorRate` |
 | E9 | `unauthorized-access` | security (new) | 63 attempts in 7 categories: no token, forged signature, expired, `alg:none`, s7 pays for s8, s7 creates `evil-N`, s7 lists all students | none | `AuthFailureSpike` |
@@ -841,9 +899,26 @@ Summed over the table (from `results.csv`, columns `verdict` and `reps_all_passe
 | Runs whose alert result was correct | 17 / 30 | 21 / 30 | 27 / 30 |
 | Known-state restores that succeeded | 30 / 30 | 30 / 30 | 30 / 30 |
 
-The endterm passes every criterion in every repetition. Two of these PASS verdicts mean less than
-they appear to, because baseline passes them too (E6 and E8, §8.4). The three incorrect endterm alert
-results are all E2 (§8.3).
+The endterm passes every scenario acceptance criterion in every repetition. Two of these PASS verdicts
+mean less than they appear to, because baseline passes them too (E6 and E8, §8.4). The three incorrect
+endterm alert results are all E2 (§8.3). They do not change E2's verdict, because E2's acceptance
+criteria do not include alert correctness, but they do fail requirement DR7.
+
+**The requirements of §2.2 against the endterm results.** The scenario verdicts above are per
+acceptance criterion; this table maps the same data back to DR1 to DR10.
+
+| # | Met in endterm? | Evidence (endterm, 3 runs per scenario) |
+|---|---|---|
+| DR1 | met | E1 A 99.994 % ± 0.010 %, E4 A 99.989 % ± 0.005 %; 0 lost, 0 duplicate (§8.2) |
+| DR2 | met | E7 A 99.992 % ± 0.008 % with gateway-1 killed; 0 duplicate (§8.2, §8.5) |
+| DR3 | met | E3 throughput during the fault 153.8 against 170.8 req/s before it (0.90); p95 25 ms ± 4 ms over the run, 26 ms over the fault window ([`analysis/recovery-by-op.md`](analysis/recovery-by-op.md) §2) |
+| DR4 | met | E2 read availability 99.890 % ± 0.068 %; `DatabaseDown` after 8.34 s ± 0.56 s (§8.2, §8.3) |
+| DR5 | met | E5 0 duplicate, 0 lost, 0 orphaned, ledger balanced in 3/3 (§8.2) |
+| DR6 | met (weak test, §8.4 item 5) | E6 error rate 0.405 % ± 0.025 % (all window-close artefacts), p95 473 ms ± 13 ms, 0 × 429 (§8.2) |
+| DR7 | **not met** (E2) | the must-fire alert fired in all 18 runs of E2, E4, E7, E8, E9 and E10, and E4, E7, E8, E9 and E10 had no unexpected alert (3/3 correct each). In E2, `HighLatencyP95` fired in 3 of 3 runs and is not in the scenario's alert list: alert result correct 0/3 (`results.csv`, `db-failure`/`endterm`: `alerts_correct` 0, `alerts_unexpected` `HighLatencyP95`). The cause is the timeout-nesting defect of §8.3 and §9.1 |
+| DR8 | met | E9 63 of 63 attempts denied (36 × 401, 27 × 403) and 63 audit deny events in each run; 0 attacker payments, 0 `evil-*` students (§8.5) |
+| DR9 | met | E10 0 × 5xx; burst and brute force answered 429; no container restarted (§8.5) |
+| DR10 | met (tests, no experiment) | `test_hostile_request_id_replaced`, `test_request_id_propagates_to_payment_service_log`; one request traced across hops in [`OBSERVABILITY.md`](OBSERVABILITY.md) |
 
 ### 8.2 Spec §7 measurements, baseline vs midterm vs endterm
 
@@ -938,6 +1013,44 @@ at all, i.e. the fault was masked at the 1 s resolution. Alert detection times a
 detection time near 50 s and every recovery time of 51.00 s comes from requests that were still in
 flight when the workload stopped (+50 s after the injection) and are recorded as
 `abandoned_at_window_close`. Read these cells as "no client-visible failure caused by the fault".
+
+**Write-path (per-operation) recovery** (derived from the raw logs). The recovery column above counts a
+1 s bin as down only if no request at all succeeded in it, so an outage of one operation while the
+others keep succeeding is invisible to it. In E2, E5 and E8 the payment path was down in the FT modes
+while reads were served, and the column shows "–". `experiments/recovery-by-op.ts` measures each
+operation separately from `logs/endterm/*/workload.jsonl.gz` and the run's `injectTs`/`repairTs`, and
+writes [`analysis/recovery-by-op.md`](analysis/recovery-by-op.md) (and `.csv`). "Recovered" is the first
+successful request of that operation sent after its last failed one, in seconds after the injection;
+window-close abandons are excluded. The repair is at +25.00 s. Mean ± sd over the runs that had a
+failure of that operation:
+
+| Scenario | Operation | baseline | midterm | endterm |
+|---|---|---|---|---|
+| E1 app-crash | student reads | 25.73 s ± 1.00 s | no failure | no failure |
+| E2 db-failure | payments (writes) | 26.42 s ± 5.03 s (6 to 10 failures per run: the hanging workers send few) | 30.34 s ± 0.52 s (repair + 5.34 s) | 31.97 s ± 2.70 s (repair + 6.97 s; runs 30.63, 30.21, 35.08 s) |
+| E4 node-failure | student reads | 38.20 s ± 16.67 s [2/3]; r1 not recovered within the window | no failure | no failure |
+| E4 node-failure | payments (writes) | 33.60 s ± 14.21 s | no failure | no failure |
+| E5 txn-interrupt | payments (writes) | 26.16 s ± 0.71 s (after the repair) | 5.17 s ± 0.01 s (restart policy, before the repair) | 5.80 s ± 0.49 s (restart policy, before the repair; runs 5.93, 6.20, 5.25 s) |
+| E7 gateway-failure | every operation | 26.50 s to 26.52 s (sd 0.13 s to 0.14 s) | 27.43 s to 27.44 s (sd 1.06 s to 1.08 s) | no failure |
+| E8 error-spike | payments (writes) | 25.03 s ± 0.01 s | 25.70 s ± 0.13 s (reset + 0.70 s) | 25.81 s ± 0.04 s (reset + 0.81 s) |
+| E8 error-spike | student reads | 25.02 s ± 0.01 s | no failure (stale cache, HTTP 203) | no failure (stale cache, HTTP 203) |
+
+The first failure of each of these was within 0.4 s of the injection in every run. In E2 endterm a
+few reads also failed: 9, 3 and 2 transcript reads (last one recovered at 24.40 s ± 3.05 s) and 2, 2
+and 0 student reads at about +31 s, after the primary had been started again (same file, §1).
+
+**Resource use at the load spike** (E6; `metrics.resources` in each run's `metrics.json`, sampled every
+2 s by `docker stats`; the range is the per-run maximum over the 3 runs):
+
+| Container | max CPU baseline | midterm | endterm | max memory baseline | midterm | endterm |
+|---|---|---|---|---|---|---|
+| gateway-1 | 102.69 % – 104.69 % | 102.23 % – 106.82 % | 81.68 % – 97.34 % | 66.38 – 74.04 MiB | 71.73 – 76.48 MiB | 67.11 – 68.75 MiB |
+| gateway-2 | 10.51 % – 12.71 % | 10.47 % – 12.43 % | 80.67 % – 81.74 % | 53.70 – 55.52 MiB | 50.99 – 53.81 MiB | 67.60 – 77.36 MiB |
+| postgres-primary | 20.47 % – 23.86 % | 19.67 % – 23.60 % | 23.98 % – 29.23 % | 106.3 – 109.6 MiB | 121.8 – 133.7 MiB | 120.0 – 130.8 MiB |
+| nginx | 6.52 % – 7.17 % | 6.31 % – 6.47 % | 7.67 % – 8.19 % | 12.51 – 14.63 MiB | 12.23 – 14.86 MiB | 12.38 – 13.57 MiB |
+
+100 % is one full core. In baseline and midterm, nginx sends everything to gateway-1 (`single.conf`),
+which saturates one core while gateway-2 idles; in endterm the two gateways share the load (§8.4 item 5).
 
 **Data integrity** (totals over the 3 runs; RESULTS.md (d)):
 
@@ -1077,13 +1190,15 @@ Each of these was checked against the raw run data before it was written down.
    all 3 baseline runs and in no FT run. The whole-run p95 criterion is weak. A during-fault p95 would
    have discriminated.
 5. **E6: baseline passes the high-load scenario.** At 110 workers no request in any mode failed
-   because of the load (item 1). The peak during the ramp was 314.5, 319.6 and 362.0 successful req/s,
-   far below the "about 2 000 req/s" the plan assumed when sizing the staff quota (plan Review Focus
-   1). The system was loaded but not broken. The bottleneck was the single gateway process: in
-   baseline and midterm, `gateway-1` peaked at 102 % to 107 % CPU (one full core: the gateway is a
+   because of the load (item 1). The mean goodput over the 25 s after the ramp started
+   (`duringFaultRps`, injection to the scheduled repair) was 314.5, 319.6 and 362.0 successful req/s,
+   and the 110 workers kept running until the window closed (303.3, 311.3 and 349.5 req/s after the
+   scheduled repair). Both are far below the "about 2 000 req/s" the plan assumed when sizing the
+   staff quota (plan Review Focus 1). The system was loaded but not broken. The bottleneck was the
+   single gateway process: in baseline and midterm, `gateway-1` peaked at 102 % to 107 % CPU (one full core: the gateway is a
    single Python process) while `gateway-2` idled at 10 % to 13 %. In endterm both gateways took the
-   load (81 % to 97 % each). Latency in the closed loop then rises instead of errors. The "no request
-   rate-limited" criterion is trivially true in baseline and midterm, which have no limiter, and the
+   load (81 % to 97 % each; per-container table in §8.2). Latency in the closed loop then rises
+   instead of errors. The "no request rate-limited" criterion is trivially true in baseline and midterm, which have no limiter, and the
    "resources sampled" criterion is a check of the harness. So E6 does not discriminate between modes.
    It shows that the endterm's limiter did not throttle the legitimate peak (0 × 429 at 362 req/s,
    i.e. far below the 5 000/s staff quota). It does not show overload protection. Baseline's 2 176
@@ -1105,9 +1220,13 @@ Each of these was checked against the raw run data before it was written down.
    midterm or endterm run, but those modes also check readiness and retry, so the campaign cannot show
    whether they are immune or only mask it. Not investigated further. It is a fault the midterm
    campaign did not reveal, and it is recorded here as found.
-8. **E1 baseline: recovery time 13.60 s ± 12.95 s [2/3].** Baseline does not go down in E1. It keeps
-   answering about 6.8 % of requests with 503 for 25 s. The "outage" behind the recovery time is a
-   single 1.4 s to 1.7 s interval with no success, at +3.0 s in r1 and at +21.0 s in r2, and r3 has
+8. **E1 baseline: recovery time 13.60 s ± 12.95 s [2/3].** Baseline does not go down in E1. During the
+   25 s fault it fails 643 of 2254, 647 of 2210 and 640 of 2212 requests (28.5 %, 29.3 % and 28.9 %),
+   about half of the student reads (1930 of 3888) and no transcript read or payment, all but 5 of them
+   with 503 (from the raw logs; [`analysis/recovery-by-op.md`](analysis/recovery-by-op.md) §2). Over the
+   whole 70 s run that is the 6.775 % of §8.2. The student reads were back 25.73 s ± 1.00 s after the
+   injection, around the repair (§8.2, per-operation recovery table). The "outage" behind the recovery
+   time is a single 1.4 s to 1.7 s interval with no success, at +3.0 s in r1 and at +21.0 s in r2, and r3 has
    none (`reliability.outages` in `metrics.json`). The recovery time of a partial failure depends on
    when such a stall happens, which is why the spread is as large as the mean. For partial failures,
    error rate and throughput are the meaningful measures, not recovery time.
@@ -1135,8 +1254,14 @@ the observed result.
 - **E2 db-failure: hypothesis confirmed for midterm and endterm, with a latency defect.**
   `DatabaseDown` fired after 7.67 s (midterm) and 8.34 s (endterm) on average (criterion ≤ 10 s).
   Reads stayed available (99.936 % and 99.890 %) through the standby and the stale cache. Payment
-  writes failed fast as designed. No payment was lost or duplicated. Read latency during the outage
-  was about 2.4 s (§8.3), and that is why `HighLatencyP95` fired.
+  writes failed fast as designed. No payment was lost or duplicated. During the outage the median read
+  still took 3 ms, but 9.6 % of the 1 740 reads took 2 s or more (about 2.4 s each: the stale-cache
+  path of §8.3), so the read p95 over the fault window was 2 473 ms (midterm: 11.8 %, p95 2 491 ms; from
+  the raw logs, [`analysis/recovery-by-op.md`](analysis/recovery-by-op.md) §2). That slow minority is
+  what pushed the gateway p95 over 1 s, and it is why `HighLatencyP95` fired. Write-path recovery
+  (from the raw logs): payments failed from +0.24 s to the last failure at +31.96 s ± 2.71 s, and were
+  back at 31.97 s ± 2.70 s, i.e. 5.2 to 10.1 s after the primary was started again (midterm: 30.34 s ±
+  0.52 s).
 - **E3 net-timeout: hypothesis confirmed for endterm only.** Outlier ejection (S11) is the deciding
   mechanism. Each endterm run logged 6 ejections of student-1 (two gateways, each ejecting it for
   10 s at a time over the 25 s fault; from the raw logs, `"kind":"ejection"`). It had 30 failed
@@ -1151,7 +1276,11 @@ the observed result.
 - **E5 txn-interrupt: hypothesis confirmed for midterm and endterm.** Each run rolled back the 2
   orphaned checkpoints (`rolledBack` = 2 in each of the 6 runs). No payment was left pending,
   duplicated or lost, and the ledger balanced. The 215 and 148 failed requests per run are payments
-  sent while both payment replicas were crashing and restarting. Baseline left 2 payments `pending`
+  sent while both payment replicas were crashing and restarting. From the raw logs, the payment path
+  was down from the injection until 5.17 s ± 0.01 s (midterm) and 5.80 s ± 0.49 s (endterm) after it,
+  when the restart policy had brought the replicas back and the crash flag was no longer set; the
+  scheduled repair at +25 s had nothing left to do. Baseline, with no restart policy, failed every
+  payment until 26.16 s ± 0.71 s, after the repair. Baseline left 2 payments `pending`
   per run (6 in total, `PaymentsStuckPending` fired after 38.35 s) and had 862 duplicate charges.
 - **E6 high-load: hypothesis confirmed, but the test is weak** (§8.4 item 5). Error rate ≤ 1 % and
   p95 ≤ 1 000 ms held in every mode, and no legitimate request was rate-limited.
@@ -1162,7 +1291,10 @@ the observed result.
   designed (Review Focus 2). Baseline and midterm, which have one gateway, were down until the
   gateway was restarted: 0.8 req/s during the fault, recovery 26.50 s and 27.43 s (the repair is at
   +25 s), A 68.975 % and 67.155 %. `InstanceDown` fired in all 9 runs (6.01 s, 5.00 s, 6.34 s).
-- **E8 error-spike: hypothesis confirmed in every mode** (§8.4 item 6).
+- **E8 error-spike: hypothesis confirmed in every mode** (§8.4 item 6). The payment path, which
+  cannot degrade, was down for the whole fault in every mode and came back 0.03 s ± 0.01 s (baseline),
+  0.70 s ± 0.13 s (midterm) and 0.81 s ± 0.04 s (endterm) after the chaos was reset at +25 s (from the
+  raw logs, write-path recovery in §8.2).
 - **E9 unauthorized-access: hypothesis confirmed for endterm.** In each of the 3 endterm runs, all 63
   attempts were denied (36 × 401 for no, forged, expired and `alg:none` tokens; 27 × 403 for the s7
   attempts refused by the policy). There were 63 audit deny events, 0 attacker payments and 0 `evil-*`
@@ -1273,13 +1405,19 @@ measured, the peak numbers of the two campaigns should not be compared.
   failure. Now it is not, and the failover needs no operator.
 - *Outlier ejection (S11)* closes the gap the midterm found with a slow replica: E3 throughput during
   the fault goes from 0.21 to 0.90 of the pre-fault rate, with 30 failed attempts instead of 249.
-- *Security controls* change E9 and E10 from "every attack succeeds, unnoticed" to "every attack is
-  denied, audited and alerted on within about 9 s". The data is unchanged and the legitimate workload
-  keeps ≥ 99.99 % availability. The difference is binary, and that is what a security control should
-  show.
+- *Security controls.* In E9 every attack went from accepted (54 × 201, 9 × 200 per run, with 41
+  attacker payments and 9 `evil-*` students reaching the database) to denied (36 × 401, 27 × 403),
+  audited (63 deny events per run) and alerted (`AuthFailureSpike` after 8.34 s ± 0.58 s), with the
+  data unchanged. In E10 the baseline and midterm already rejected most malformed requests and every
+  brute-force login (401). What changed is that the 50 malformed payments accepted with 201 per run,
+  and the 20 (baseline) or 10 (midterm) answered 503, became 4xx only, and that the burst and the
+  brute force went from unthrottled and unalerted to rate-limited (429), which raised `AuthFailureSpike`
+  (9.01 s ± 1.00 s). The legitimate workload kept ≥ 99.99 % availability throughout.
 - *Observability and alerting* do not separate the modes, by design. They are on in every mode, so
-  all three were measured the same way. They detected every fault class that has an alert, with
-  mean detection delays between 5.00 s and 10.67 s.
+  all three were measured the same way. Every must-fire alert fired, with mean detection delays
+  between 5.00 s and 10.67 s (§8.3). Alerts outside the must-fire lists took longer when they fired
+  (for example `HighErrorRate` 15.67 s to 23.02 s in E2, RESULTS.md (c)), and one of them,
+  `HighLatencyP95` in E2, was unexpected (DR7, §8.1).
 - On the faults the midterm already handled (E1, E2, E4, E5), endterm and midterm cannot be told
   apart at 3 repetitions. Their means differ by less than their spreads, or by amounts
   that do not change a verdict. The endterm did not regress them.
@@ -1304,7 +1442,9 @@ measured, the peak numbers of the two campaigns should not be compared.
   pipeline alone (§8.6).
 
 **Against the spec's success criteria (§12).** The endterm system detected every incident class that
-has an alert rule with that rule (E2, E4, E7, E8, E9, E10), and the faults it masked (E1, E3, E5) are
+has an alert rule with that rule (E2, E4, E7, E8, E9, E10). It did not meet the second half of its
+own requirement DR7: in E2 it also raised `HighLatencyP95`, which the scenario did not expect (a true
+symptom of the timeout-nesting defect above, §8.1). The faults it masked (E1, E3, E5) are
 still visible in its logs and metrics as readiness transitions, ejections and rollbacks. One incident
 was diagnosed end to end, with a request-level trace across hops, in OBSERVABILITY.md. It limited
 the impact of service failures and of the tested misuse (§8.5), kept serving without an operator
@@ -1343,6 +1483,11 @@ Of the experiments:
   every 2 s, so a detection delay is accurate to about ±2 s.
 - **E9's denial volume is close to the `AuthFailureSpike` threshold** (63 denials against more than 60
   in 30 s). It fired in 3 of 3 runs, but a slower host could spread the attack past one window.
+- **Recovery time is defined on 1 s bins over all requests.** It cannot see an outage of one operation
+  while the others succeed. The write-path recovery of §8.2 is derived afterwards from the raw logs,
+  not computed by the harness for every run.
+- **The campaign measured the code before the final-review fixes** of §5.5. They were checked with
+  unit and integration tests and one repetition each of E5, E7 and E9, not by re-running the campaign.
 - **The midterm campaign comparison is not controlled** (§8.8).
 
 Of the system (accepted residual risks, THREAT-MODEL.md §10):
@@ -1353,6 +1498,8 @@ Of the system (accepted residual risks, THREAT-MODEL.md §10):
 - no token revocation (tokens are short-lived instead), and one shared HS256 key;
 - the audit log is a local JSONL file and is not tamper-evident;
 - the PostgreSQL primary, nginx, `auth-1` and `transcript-1` are still single instances (§3.8);
+- every service shares one database role (`app_rw`), and the containers run as root (THREAT-MODEL.md
+  R16, R15);
 - the campaign ran on PyJWT 2.10.1 and FastAPI 0.115.6 (Starlette 0.41.3), whose 24 known
   vulnerabilities were found by `pip-audit` and fixed afterwards by upgrading to PyJWT 2.15.1,
   FastAPI 0.162.2 and Starlette 1.10.0 (§5.4). The upgraded pins were checked with one repetition of
@@ -1362,8 +1509,11 @@ Of the system (accepted residual risks, THREAT-MODEL.md §10):
 
 Of the process:
 
-- The CI workflow has never run on GitHub, because the branch was not pushed from the working
-  environment (§11.5). Every check it contains was run locally.
+- The CI workflow has never run on GitHub. The workflow is committed and the branch is pushed, but
+  GitHub Actions did not start any run because the repository owner's GitHub account is locked for
+  billing (§11.5). The jobs' commands were run locally instead
+  ([`security/post-upgrade-checks.log`](security/post-upgrade-checks.log),
+  [`security/post-review-checks.log`](security/post-review-checks.log)).
 - The demonstration video is not recorded yet. The rehearsal transcripts are in `reports/endterm/demo/`.
 - The implementation was written by an AI coding assistant on the team's behalf (§11.6).
 
@@ -1398,7 +1548,9 @@ the campaign on the upgraded PyJWT and FastAPI/Starlette pins (§5.4) and audit 
 only `requirements.txt`; filter window-close requests out of detection and recovery and add a
 during-fault p95; switch to an open-loop workload for E3 and E6 and raise E6 until something breaks;
 find the cause of the E4 baseline misrouting; share rate-limit state (or divide quotas by the number
-of gateways); add a second nginx and automatic database failover; push the branch so CI runs.
+of gateways); add a second nginx and automatic database failover; give each service its own database
+role and run the containers as a non-root user; get GitHub Actions running once the account's billing
+lock is lifted.
 
 ## 10. Conclusion and references
 
@@ -1411,19 +1563,23 @@ logging, strict validation, rate limiting, generated secrets, least-privilege ro
 chaos endpoint). It keeps the baseline and midterm configurations deployable for a fair comparison.
 
 In a 90-run campaign the endterm passed all ten scenarios in all three repetitions. The midterm
-configuration passed six and the baseline two. The endterm's two measurable gains over the midterm
+configuration passed six and the baseline two. Measured against this report's own requirements, the
+endterm met nine of ten: DR7 is not met, because E2 raised an alert (`HighLatencyP95`) that its
+scenario did not expect, in all three runs (§8.1). The endterm's two measurable gains over the midterm
 are the ones its new mechanisms were built for. Killing a gateway no longer causes an outage (A
 67.155 % → 99.992 %). A slow replica no longer costs most of the throughput (0.21 → 0.90 of the
-pre-fault rate). The security controls turned every tested attack from a silent success into a
-denied, audited and alerted event, without lowering the availability of legitimate traffic and
+pre-fault rate). The security controls turned every E9 attack from a silent success into a denied,
+audited and alerted event, turned E10's accepted and 5xx malformed payments into 4xx answers, and
+rate-limited its burst and brute force, without lowering the availability of legitimate traffic and
 without throttling it. Across the 60 midterm and endterm runs, no payment was lost, duplicated or left
 pending. The baseline duplicated 11058.
 
 The campaign also showed where the evidence is weak and where the system is not yet right. Several
 acceptance criteria do not discriminate between modes. Detection and recovery times include
-window-close artefacts. The closed-loop workload flatters a system that hangs. The standby fallback
-is slower than the gateway's timeout, which an "unexpected" alert exposed. These are reported here
-with the raw data that shows them, rather than tuned away after the fact.
+window-close artefacts, and the harness's recovery time cannot see a write-path outage, which had to
+be derived from the raw logs (§8.2). The closed-loop workload flatters a system that hangs. The
+standby fallback is slower than the gateway's timeout, which an "unexpected" alert exposed. These are
+reported here with the raw data that shows them, rather than tuned away after the fact.
 
 ### 10.2 References
 
@@ -1507,8 +1663,10 @@ with the raw data that shows them, rather than tuned away after the fact.
 | `reports/endterm/RESULTS.md`, `results.csv` | aggregated tables | committed (`5a02537`) |
 | `reports/endterm/figures/` | Grafana snapshots | committed (`3f8c9a9`) |
 | `reports/endterm/deps/` | first `pip-audit` output, pre-upgrade pins (§5.4) | committed |
-| `reports/endterm/security/` | `pip-audit` before and after the dependency upgrade and of the gateway image; test output after the upgrade (§5.4) | committed |
+| `reports/endterm/security/` | `pip-audit` before and after the dependency upgrade and of the gateway image; test output after the upgrade (§5.4) and after the final-review fixes (§5.5) | committed |
 | `reports/endterm/post-upgrade/<scenario>__endterm__r0/metrics.json`, `logs/endterm/post-upgrade/` | post-upgrade check: one repetition of four endterm scenarios on the upgraded pins; not part of the campaign or its aggregate (§5.4) | committed |
+| `reports/endterm/analysis/recovery-by-op.md`, `.csv` | per-operation outage and recovery and fault-window statistics, derived from the campaign's raw logs by `experiments/recovery-by-op.ts` (§8.2) | committed with the final-review fixes |
+| `reports/endterm/post-review/<scenario>__endterm__r0/metrics.json`, `logs/post-review/` | one repetition of E5, E7 and E9 on the code after the final-review fixes; not part of the campaign or its aggregate (§5.5) | committed with the final-review fixes |
 | `logs/<scenario>__<mode>/`, `reports/runs/`, `reports/COMPARISON.md` | the midterm campaign (one run per scenario and mode) | committed at `midterm-final` |
 
 Midterm reference figures, for orientation only. They come from the midterm campaign, one run per
@@ -1520,9 +1678,15 @@ charges. Request-based availability was 95.43 % against 99.16 %.
 
 ### 11.5 CI run
 
-No CI run is linked yet. The workflow is committed (`c33badc`), but the branch had not been pushed
-from the environment in which this work was done, so GitHub Actions has not run it. The link is added
-here once it has run.
+No CI run is linked. The workflow is committed (`c33badc`) and the branch is pushed to `origin`, but
+GitHub Actions did not start a run, because the repository owner's GitHub account is locked for
+billing. This is an account problem, not a defect of the workflow. The commands of every job were run
+locally: the unit, harness, alert-rule and integration checks after the §5.4 upgrade are in
+[`security/post-upgrade-checks.log`](security/post-upgrade-checks.log) (the `pip-audit` result in
+[`security/pip-audit-after.json`](security/pip-audit-after.json)), and the same checks plus the `config`
+job's commands after the final-review fixes are in
+[`security/post-review-checks.log`](security/post-review-checks.log). The link is added here once
+Actions can run.
 
 ### 11.6 Individual contributions
 

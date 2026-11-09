@@ -89,6 +89,13 @@ def test_deny_reasons_are_bounded() -> None:
     ("GET", "students", ".."),            # a dot segment would be normalised to the list route upstream
     ("GET", "transcripts", "."),
     ("DELETE", "students", "s7"),         # an unknown method
+    ("GET", "timetables", "openapi.json"),  # upstream endpoints in the {param} position
+    ("GET", "timetables", "health"),
+    ("GET", "timetables", "metrics"),
+    ("GET", "timetables", "docs"),
+    ("GET", "students", "health"),
+    ("GET", "payments", "metrics"),
+    ("GET", "transcripts", "chaos"),
 ])
 def test_routes_outside_the_matrix_are_denied(who: str, method: str, pool: str, path: str) -> None:
     decision = policy.authorize(WHO[who], method, pool, path, None)

@@ -223,7 +223,7 @@ The same demo in baseline, from [`demo/baseline-unauthorized.txt`](demo/baseline
 |---|---|
 | baseline | every attack is accepted (2xx); `after` is `before + 5`; no audit lines; the verdict reads `ACCEPTED: 5 of 5 ...` (rehearsed: as quoted above) |
 | midterm | same as baseline |
-| endterm | 401 x4, 403 x1; one audit `deny` line per rid; `after == before`; `PASS` (rehearsed: as quoted above, three times) |
+| endterm | 401 x4, 403 x1; one audit `deny` line per rid; `after == before`; `PASS` (rehearsed: as quoted above, twice; transcripts `demo/endterm-unauthorized.txt` and `demo/endterm-default-order.txt`) |
 
 Point at: the audit lines (no password, token or `Authorization` header in them, Task 9). Then run
 the `grep` the demo prints. It shows every line logged under that `rid`: nginx forwards the

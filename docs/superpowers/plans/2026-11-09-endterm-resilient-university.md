@@ -275,7 +275,7 @@ The midterm report §11 names this as the most valuable next step. The per-pool 
   - `test_never_ejects_more_than_half_pool` (2 replicas: the second never ejected)
   - `test_ring_ignores_ejection_in_midterm_mode`
 - [ ] **Step 2:** Implement → PASS.
-- [ ] **Step 3:** Smoke test on endterm. `curl -X POST localhost:3011/chaos -H "x-chaos-token: $CHAOS_TOKEN" -d '{"latencyMs":3000}'`, then 50 GETs to `/api/students/s7`. Gateway `/metrics` shows `instance_ejected{target="http://student-1:3000"} 1`. The token header only matters once Task 12 lands.
+- [ ] **Step 3:** Smoke test on endterm. `curl -X POST localhost:3011/chaos -H "x-chaos-token: $CHAOS_TOKEN" -H 'content-type: application/json' -d '{"latencyMs":3000}'`, then 50 GETs to `/api/students/s7`. Gateway `/metrics` shows `instance_ejected{target="http://student-1:3000"} 1`. The token header only matters once Task 12 lands.
 - [ ] **Step 4:** Commit `feat(resilience): per-instance outlier ejection`.
 
 ### Task 7: Redundant gateways behind nginx, and a mandatory payment Idempotency-Key

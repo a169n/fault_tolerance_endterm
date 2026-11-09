@@ -14,7 +14,9 @@
 It fails closed:
   - no principal → 401 on every route, listed or not (authentication comes first);
   - a route the matrix does not list (another method, a list route not above, a sub-path with
-    more than one segment, a ``.``/``..`` segment that the upstream URL would normalise away) → 403;
+    more than one segment, a ``.``/``..`` segment that the upstream URL would normalise away, or a
+    segment that names one of the upstream's own endpoints, e.g. ``/api/timetables/openapi.json``,
+    which the gateway would forward to ``/openapi.json`` on the service) → 403;
   - a principal that is not a well-formed ``Principal`` (unknown role, student without an id) → 403;
   - any exception while deciding → 403 (401 without a principal), reason ``policy_error``.
 
@@ -76,11 +78,17 @@ RULES: Dict[Tuple[str, str, bool], Tuple[str, Rule]] = {
 }
 
 
+# Single segments that are endpoints of every upstream service (app/core/service.py, FastAPI's docs,
+# app/fault_injection.py), not a {param}: the gateway forwards /api/<pool>/<seg> to /<seg> upstream.
+RESERVED_SEGMENTS = frozenset({"health", "metrics", "chaos", "docs", "redoc", "openapi.json"})
+
+
 def _param(path: str) -> Tuple[bool, Optional[str]]:
-    """(is a single plain segment or empty, the segment or None). ``s7/x``, ``.`` and ``..`` are not."""
+    """(is a single plain segment or empty, the segment or None). ``s7/x``, ``.``, ``..`` and a
+    reserved upstream endpoint name are not."""
     if path == "":
         return True, None
-    if "/" in path or path in (".", ".."):
+    if "/" in path or path in (".", "..") or path in RESERVED_SEGMENTS:
         return False, None
     return True, path
 
