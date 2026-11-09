@@ -5,6 +5,10 @@ POST /token {"username", "password"}
   401 {"error": "invalid credentials"}   the same body for an unknown user and a wrong password
   400 {"error": "username and password are required"}
 
+Input the client controls (malformed or deeply nested JSON, a lone-surrogate password) always gets
+a 4xx, never a 5xx: the gateway retries a 5xx and counts it against the auth circuit breaker and
+outlier ejection, so a 5xx here would let anyone block every login without credentials.
+
 Users live in ``app_users`` (config/postgres/init/30-auth.sql). On start-up, if the table is
 empty, the demo users are seeded with DEMO_PASSWORD from .env (synthetic data only):
 admin (admin), bursar (staff), s7 and s8 (students s7 and s8).
@@ -124,8 +128,8 @@ async def token(request: Request):
     # The body is parsed as JSON whatever its content type (`curl -d` sends a form type).
     try:
         body = json.loads(await request.body() or b"null")
-    except (ValueError, UnicodeDecodeError):
-        body = None
+    except (ValueError, RecursionError):  # bad JSON or UTF-8 (both ValueError), or nested too deep
+        body = None  # a 400, never a 5xx: client input must not trip the gateway's auth breaker
     username = body.get("username") if isinstance(body, dict) else None
     password = body.get("password") if isinstance(body, dict) else None
     if not isinstance(username, str) or not isinstance(password, str):

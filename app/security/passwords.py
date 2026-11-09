@@ -23,7 +23,12 @@ def _b64(raw: bytes) -> str:
 
 
 def _derive(password: str, salt: bytes) -> bytes:
-    return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=N, r=R, p=P, dklen=KEY_BYTES)
+    # "surrogatepass": JSON can carry a lone surrogate ("\\ud800") that strict UTF-8 cannot encode.
+    # A client-controlled password must never raise (a 5xx would count against the gateway's auth
+    # breaker); every valid str encodes exactly as with strict UTF-8, so stored hashes are unchanged,
+    # and the bytes of a lone surrogate are invalid UTF-8, so they match no real password.
+    raw = password.encode("utf-8", "surrogatepass")
+    return hashlib.scrypt(raw, salt=salt, n=N, r=R, p=P, dklen=KEY_BYTES)
 
 
 def hash_password(password: str) -> str:
@@ -38,6 +43,7 @@ def verify_password(password: str, stored: str) -> bool:
             return False
         salt = base64.b64decode(salt_b64, validate=True)
         expected = base64.b64decode(hash_b64, validate=True)
-    except (ValueError, binascii.Error):
+        derived = _derive(password, salt)
+    except (ValueError, binascii.Error):  # UnicodeError is a ValueError: fail closed, never raise
         return False
-    return hmac.compare_digest(_derive(password, salt), expected)
+    return hmac.compare_digest(derived, expected)

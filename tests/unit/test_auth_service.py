@@ -78,6 +78,27 @@ def test_malformed_login_body_is_400(client: TestClient, body: bytes) -> None:
     assert response.json() == {"error": "username and password are required"}
 
 
+def test_deeply_nested_login_body_is_400_not_5xx(client: TestClient) -> None:
+    # json.loads raises RecursionError here; it must not escape as a 503 (which the gateway would
+    # retry and count against the auth circuit breaker)
+    response = client.post("/token", content=b"[" * 200_000, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": "username and password are required"}
+
+
+@pytest.mark.parametrize("raw", [
+    b'{"username":"bursar","password":"\\ud800"}',      # lone surrogate, known user
+    b'{"username":"nobody","password":"x\\udfffy"}',     # lone surrogate, unknown user
+    b'{"username":"bad name","password":"\\ud800"}',     # lone surrogate, implausible username
+])
+def test_lone_surrogate_password_is_invalid_credentials(client: TestClient, raw: bytes) -> None:
+    before = _denied()
+    response = client.post("/token", content=raw, headers={"content-type": "application/json"})
+    assert response.status_code == 401
+    assert response.json() == {"error": "invalid credentials"}
+    assert _denied() == before + 1  # a failed login like any other: AuthFailureSpike sees it
+
+
 @pytest.mark.parametrize("username", ["bad\nname", "x" * 65, "s7'; DROP TABLE app_users;--", "ünïcode"])
 def test_odd_usernames_are_invalid_credentials_without_lookup(monkeypatch: pytest.MonkeyPatch,
                                                               client: TestClient, username: str) -> None:
