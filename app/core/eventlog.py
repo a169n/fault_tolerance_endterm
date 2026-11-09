@@ -7,6 +7,8 @@ import time
 from collections import Counter
 from typing import Dict, Literal
 
+from .context import REQUEST_ID
+
 LOG_DIR = os.environ.get("LOG_DIR", "/logs")
 SERVICE = os.environ.get("SERVICE_NAME", "unknown")
 
@@ -37,9 +39,10 @@ def now_ms() -> int:
 
 
 def log(**event) -> None:
-    _stream.write(
-        json.dumps({"ts": now_ms(), "svc": SERVICE, "ft": 1 if ft_enabled() else 0, "mode": mode(), **event}) + "\n"
-    )
+    # rid ties the line to its request; level lets an operator filter failures. Explicit values win.
+    line = {"ts": now_ms(), "svc": SERVICE, "ft": 1 if ft_enabled() else 0, "mode": mode(),
+            "rid": REQUEST_ID.get(), "level": "error" if event.get("ok") is False else "info", **event}
+    _stream.write(json.dumps(line) + "\n")
     _counts[(event["kind"], _outcome(event))] += 1
     if event["kind"] == "health":
         _instance_up[event["target"]] = 1 if event["ok"] else 0

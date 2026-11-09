@@ -10,6 +10,8 @@ import httpx
 from fastapi import Body, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 
+from ..core.context import HEADER as REQUEST_ID_HEADER
+from ..core.context import REQUEST_ID, new_request_id
 from ..core.errors import UpstreamError
 from ..core.eventlog import endterm_enabled, ft_enabled, log, mode
 from ..core.service import create_app
@@ -96,6 +98,7 @@ async def proxy(pool: str, request: Request, path: str):
 
     ring = load_balancer.ring(pool, POOLS[pool], health_check.is_up)   # H1 + S4
     idem = idempotency.forward_key(request.headers)                    # S5
+    rid = REQUEST_ID.get() or new_request_id()  # set by the middleware; every attempt reuses it
     chosen = {"instance": ring[0], "i": 0}
 
     async def attempt(timeout: Optional[float]):
@@ -106,7 +109,8 @@ async def proxy(pool: str, request: Request, path: str):
         try:
             response = await _client.request(
                 method, url, content=body or None,
-                headers={"content-type": "application/json", "idempotency-key": idem},
+                headers={"content-type": "application/json", "idempotency-key": idem,
+                         REQUEST_ID_HEADER: rid},
                 timeout=timeout,
             )
         except Exception as exc:
