@@ -3,7 +3,7 @@
 // (1600x1000 viewport at deviceScaleFactor 2). Needs the stack (Grafana on :3000) still holding that
 // window in Prometheus, so run it after the campaign of that mode and before `docker compose down -v`.
 // Usage: node --experimental-strip-types experiments/snapshot.ts <scenario>__<mode>__r<N> [<tag> ...]
-//          [--grafana http://localhost:3000] [--pad-ms 0] [--out reports/endterm/figures]
+//          [--grafana http://localhost:3000] [--pad-ms 0] [--out reports/endterm/figures] [--full]
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -13,6 +13,17 @@ import { fileURLToPath } from 'node:url';
 export const DASHBOARD_UID = 'university';
 export const VIEWPORT = { width: 1600, height: 1000 };
 export const SCALE = 2;
+// The 1600x1000 shot shows the top three dashboard rows (traffic, latency, upstreams, health,
+// ejection). --full also saves <tag>-full.png from a viewport tall enough for all 47 grid rows
+// (30 px + 8 px margin each in kiosk mode), so circuit breakers, auth denials, the database and the
+// alert timeline are in the figure too.
+export const FULL_HEIGHT = 2000;
+
+export function captureSpec(tag: string, full: boolean): { file: string; viewport: { width: number; height: number } } {
+  return full
+    ? { file: `${tag}-full.png`, viewport: { width: VIEWPORT.width, height: FULL_HEIGHT } }
+    : { file: `${tag}.png`, viewport: VIEWPORT };
+}
 
 // kiosk hides Grafana's menus for the PNG; the live demo (demo.ts) links without it, so the time
 // picker stays usable.
@@ -46,7 +57,8 @@ function args(argv: string[]) {
   const opts: Record<string, string> = {};
   const tags: string[] = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) opts[argv[i].slice(2)] = argv[++i];
+    if (argv[i] === '--full') opts.full = '1';
+    else if (argv[i].startsWith('--')) opts[argv[i].slice(2)] = argv[++i];
     else tags.push(argv[i]);
   }
   return { opts, tags };
@@ -61,7 +73,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const bad = tags.filter((t) => !parseTag(t));
   if (tags.length === 0 || bad.length || !Number.isFinite(padMs) || padMs < 0) {
     console.log('usage: node --experimental-strip-types experiments/snapshot.ts <scenario>__<mode>__r<N> [...] ' +
-      '[--grafana URL] [--pad-ms N] [--out DIR]');
+      '[--grafana URL] [--pad-ms N] [--out DIR] [--full]');
     if (bad.length) console.log(`not a run tag: ${bad.join(', ')}`);
     process.exit(1);
   }
@@ -70,8 +82,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const browser = await chromium.launch();
   let failed = 0;
   try {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: SCALE });
-    const page = await context.newPage();
+    const shots = opts.full ? [false, true] : [false];
     mkdirSync(outDir, { recursive: true });
     for (const tag of tags) {
       const file = join(ROOT, 'reports/endterm/runs', tag, 'metrics.json');
@@ -83,16 +94,23 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const run = JSON.parse(readFileSync(file, 'utf8')) as { t0: number; t1: number };
       const { from, to } = timeWindow(run, padMs);
       const url = dashboardUrl(grafana, from, to);
-      try {
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
-        // panels render after their queries return; give the last ones a moment after the network is idle
-        await page.waitForTimeout(2_000);
-        const png = join(outDir, `${tag}.png`);
-        await page.screenshot({ path: png });
-        console.log(`${tag}: ${url} -> ${png}`);
-      } catch (e) {
-        console.log(`!! ${tag}: ${(e as Error).message.split('\n')[0]}`);
-        failed++;
+      for (const full of shots) {
+        const spec = captureSpec(tag, full);
+        const context = await browser.newContext({ viewport: spec.viewport, deviceScaleFactor: SCALE });
+        try {
+          const page = await context.newPage();
+          await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
+          // panels render after their queries return; give the last ones a moment after the network is idle
+          await page.waitForTimeout(2_000);
+          const png = join(outDir, spec.file);
+          await page.screenshot({ path: png });
+          console.log(`${tag}: ${url} -> ${png}`);
+        } catch (e) {
+          console.log(`!! ${tag}: ${(e as Error).message.split('\n')[0]}`);
+          failed++;
+        } finally {
+          await context.close();
+        }
       }
     }
   } finally {

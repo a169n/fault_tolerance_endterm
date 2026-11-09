@@ -168,8 +168,9 @@ Prometheus, take dashboard snapshots:
 
     node --experimental-strip-types experiments/aggregate.ts
         # → reports/endterm/RESULTS.md and reports/endterm/results.csv
-    node --experimental-strip-types experiments/snapshot.ts db-failure__endterm__r1 [more tags ...]
-        # → reports/endterm/figures/<tag>.png (needs Playwright installed globally)
+    node --experimental-strip-types experiments/snapshot.ts db-failure__endterm__r1 [more tags ...] [--full]
+        # → reports/endterm/figures/<tag>.png, plus <tag>-full.png (all panels) with --full
+        #   (needs Playwright installed globally)
 
 Do not run the demo or anything else against the stack while a campaign runs.
 
