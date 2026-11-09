@@ -79,6 +79,7 @@ services:
       POSTGRES_DB: university
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_INITDB_ARGS: --data-checksums   # H4
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?run npm run up:<mode> to generate .env}  # 00-roles.sh
     command: postgres -c hba_file=/etc/postgresql/pg_hba.conf -c wal_level=replica -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby=on
     volumes:
       - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -111,12 +112,41 @@ services:
       exec gosu postgres postgres
       "
 
-  prometheus:                               # H5, opt-in: --profile monitoring
+  # Monitoring plane (H5): always on, in every mode, so the three configurations are measured
+  # the same way. It is measurement infrastructure, not behaviour under test, so it restarts
+  # on its own whatever RESTART_POLICY the mode uses.
+  prometheus:                               # scrapes every 2 s, evaluates alerts.yml every 2 s
     image: prom/prometheus:v2.53.0
-    profiles: ["monitoring"]
+    restart: unless-stopped
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports: ["9090:9090"]
+      - ./config/prometheus:/etc/prometheus:ro   # prometheus.yml + alerts.yml
+    ports: ["127.0.0.1:9090:9090"]
+
+  postgres-exporter:                        # pg_up, pg_stat_* for the primary (DatabaseDown)
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://monitor:${MONITOR_DB_PASSWORD:?run npm run up:<mode> to generate .env}@postgres-primary:5432/university?sslmode=disable&connect_timeout=1
+    ports: ["127.0.0.1:9187:9187"]
+
+  grafana:                                  # dashboard "university", anonymous read-only
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run npm run up:<mode> to generate .env}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"     # viewers need no login; only admin can edit
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/university.json
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
 
 volumes:
   pgprimary:

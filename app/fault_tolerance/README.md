@@ -32,7 +32,7 @@ nothing that uses them.
 | H2  | Database replication (primary → hot standby) | `docker-compose.yml`: `postgres-primary`, `postgres-replica`                                    | `[infrastructure/db_failover.py](infrastructure/db_failover.py)`     |
 | H3  | Self-healing (automatic restart)             | `docker-compose.yml`: `restart: ${RESTART_POLICY}`                                              | — (Docker does it)                                                   |
 | H4  | Storage checksums                            | `docker-compose.yml`: `--data-checksums`                                                        | — (PostgreSQL does it)                                               |
-| H5  | Independent monitoring                       | `docker-compose.yml`: `prometheus`, `[config/prometheus.yml](../../config/prometheus.yml)`      | `GET /metrics` in `[core/eventlog.py](../core/eventlog.py)`          |
+| H5  | Independent monitoring                       | `docker-compose.yml`: `prometheus`, `[config/prometheus/](../../config/prometheus/prometheus.yml)` | `GET /metrics` in `[core/eventlog.py](../core/eventlog.py)`          |
 | —   | RAID, ECC memory                             | documented only (cannot exist in containers)                                                    | `[reports/REPORT.md](../../reports/REPORT.md)` §6.3–6.5              |
 
 

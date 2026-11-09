@@ -42,7 +42,8 @@ app/                      everything that runs inside the containers
 ├── core/                 plumbing: db.py, eventlog.py (+ /metrics), service.py
 └── fault_injection.py    /chaos endpoints the experiments use to break things
 
-config/                   PostgreSQL schema + seed data, pg_hba.conf, prometheus.yml
+config/                   PostgreSQL schema + seed data + roles, pg_hba.conf,
+                          prometheus/ (scrape config, alert rules + tests), grafana/ (dashboard)
 
 experiments/              HOW the experiments are run
 ├── scenarios.ts            the 6 failure scenarios: inject + repair
@@ -87,7 +88,9 @@ generated randomly. `.env` is git-ignored. The midterm as submitted is tagged
     npm run exp app-crash   # one controlled experiment
     npm run campaign        # all six against the deployed version
 
-    npm run monitoring      # Prometheus on http://localhost:9090
+    # Monitoring is always on: Prometheus http://localhost:9090 (alerts: /alerts),
+    # Grafana http://localhost:3000/d/university (anonymous read-only; admin password in .env)
+    npm run test:alerts     # promtool unit tests for the alert rules
     # Swagger UI:           http://localhost:8080/docs  (every service: :30xx/docs)
 
 After pulling schema changes, recreate the database once: `docker compose down -v`.
@@ -102,7 +105,9 @@ After pulling schema changes, recreate the database once: `docker compose down -
 | timetable-1 / timetable-2 | 3041 / 3042 | 2 replicas |
 | transcript-1 | 3031 | 1 |
 | postgres-primary / postgres-replica | 55432 / 55433 | primary + hot standby |
-| prometheus | 9090 | optional (`--profile monitoring`) |
+| prometheus | 127.0.0.1:9090 | 1, always on (alert rules: `config/prometheus/alerts.yml`) |
+| grafana | 127.0.0.1:3000 | 1, always on (dashboard `university`) |
+| postgres-exporter | 127.0.0.1:9187 | 1, always on (`pg_up`, replication) |
 
 ## Breaking it by hand
 

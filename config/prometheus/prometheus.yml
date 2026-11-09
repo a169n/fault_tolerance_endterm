@@ -1,0 +1,37 @@
+# Always on, in every mode: the three configurations are measured the same way.
+global:
+  scrape_interval: 2s
+  scrape_timeout: 1s
+  evaluation_interval: 2s     # alert detection latency is bounded by scrape + eval + `for`
+
+rule_files:
+  - alerts.yml                # tested by alerts.test.yml (`npm run test:alerts`)
+
+scrape_configs:
+  # Static targets on purpose: a killed container stops resolving in Docker DNS, and a
+  # static target then reports up == 0 (InstanceDown). With DNS discovery it would vanish.
+  # Gateway, services and auth all expose /metrics (app/core/service.py).
+  # Note: upstream_attempts_total has its own `instance` label (the upstream URL); Prometheus
+  # keeps the scrape target in `instance` and stores that one as `exported_instance`.
+  - job_name: university
+    static_configs:
+      - targets:
+          - gateway:8080          # Task 7 replaces this with gateway-1:8080, gateway-2:8080
+          - student-1:3000
+          - student-2:3000
+          - payment-1:3000
+          - payment-2:3000
+          - transcript-1:3000
+          - timetable-1:3000
+          - timetable-2:3000
+
+  # PostgreSQL primary, through postgres-exporter (connects as the pg_monitor `monitor` role).
+  # pg_up == 0 means the exporter cannot reach the primary (DatabaseDown). With the primary
+  # down an exporter scrape takes about 1 s (failed connection attempts), which exceeds the
+  # global 1 s timeout: the scrape would fail and pg_up would vanish instead of reading 0.
+  # Hence the longer timeout here and connect_timeout=1 in the exporter's DSN.
+  - job_name: postgres
+    scrape_timeout: 2s
+    static_configs:
+      - targets:
+          - postgres-exporter:9187

@@ -14,7 +14,8 @@
     "demo": "node --experimental-strip-types experiments/demo.ts",
     "exp": "node --experimental-strip-types experiments/run.ts",
     "campaign": "node --experimental-strip-types experiments/campaign.ts",
-    "monitoring": "docker compose --profile monitoring up -d",
-    "test:harness": "node --experimental-strip-types --test \"experiments/**/*.test.ts\""
+    "monitoring": "docker compose up -d prometheus grafana postgres-exporter",
+    "test:harness": "node --experimental-strip-types --test \"experiments/**/*.test.ts\"",
+    "test:alerts": "docker run --rm -v ./config/prometheus:/p --entrypoint promtool prom/prometheus:v2.53.0 test rules /p/alerts.test.yml"
   }
 }

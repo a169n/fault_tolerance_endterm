@@ -1,0 +1,76 @@
+# Alert rules. The names are a contract: the endterm scenarios (experiments/scenarios.ts)
+# list them as mustFire / mayFire, and reports/endterm/ALERTS.md documents each one.
+# Every rule carries three annotations: summary (what it detects), threshold, and response
+# (what the system does on its own and what the operator should do).
+# Unit tests: config/prometheus/alerts.test.yml (`npm run test:alerts`).
+#
+# Gateway series are matched with svc=~"gateway.*" so the rules keep working when the single
+# gateway becomes gateway-1/gateway-2 behind nginx.
+groups:
+  - name: university
+    rules:
+      - alert: InstanceDown
+        expr: up{job="university"} == 0
+        for: 4s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} has missed Prometheus scrapes for 4s"
+          threshold: "up == 0 for 4s (two consecutive 2s scrapes)"
+          response: "Restart policy self-heals in midterm/endterm; if still firing after 60s, on-call checks docker compose ps and the instance logs by rid."
+
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        for: 4s
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL primary is unreachable (pg_up == 0)"
+          threshold: "pg_up == 0 for 4s"
+          response: "Reads fail over to the hot standby and writes fail fast (midterm/endterm); the operator restores the primary. In baseline every DB-backed route fails."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{svc=~"gateway.*", status=~"5.."}[15s]))
+            / sum(rate(http_requests_total{svc=~"gateway.*"}[15s]))
+            > 0.05
+        for: 6s
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of gateway responses are 5xx (15s window)"
+          threshold: "5xx share of gateway http_requests_total over [15s] > 0.05, for 6s"
+          response: "Check upstream_attempts_total by instance and outcome, and circuit_breaker_open; isolate the failing replica or dependency."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{svc=~"gateway.*"}[15s])))
+            > 1
+        for: 6s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway p95 latency is above 1s (15s window)"
+          threshold: "histogram_quantile(0.95, gateway http_request_duration_seconds over [15s]) > 1s, for 6s"
+          response: "Look for a slow instance (upstream_attempts_total timeouts, instance_ejected) and the DB; eject or scale the slow replica."
+
+      - alert: AuthFailureSpike
+        expr: sum(rate(auth_denied_total[30s])) > 2
+        for: 4s
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 2 requests per second denied by authentication or authorization (30s window)"
+          threshold: "sum(rate(auth_denied_total[30s])) > 2, for 4s"
+          response: "Possible intrusion attempt: review the audit log by rid and sub; block the source or revoke the credentials."
+
+      - alert: PaymentsStuckPending
+        expr: max(payments_stale_pending) > 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} payment(s) still pending 15s after creation"
+          threshold: "max(payments_stale_pending) > 0, for 10s"
+          response: "Lost or interrupted transaction: confirm the rollback sweep ran (midterm/endterm); in baseline reconcile the payment manually against the ledger."
