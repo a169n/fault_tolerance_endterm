@@ -5,7 +5,7 @@
 <title>Resilient University Information System — Endterm Report</title>
 <style>
 @page { size: A4; margin: 18mm 17mm 18mm 17mm; }
-:root { --c-base: #c4c4c4; --c-mid: #7a7a7a; --c-end: #000000; }
+:root { --c-base: #a7afbd; --c-mid: #7d91c6; --c-end: #1f4fbf; }
 * { box-sizing: border-box; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 body { font-family: "Inter", "Liberation Sans", sans-serif; font-size: 9.8pt; line-height: 1.45; color: #000; background: #fff; margin: 0; }
@@ -18,8 +18,9 @@ li { margin: 0 0 2px; }
 code, .mono { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 8.4pt; }
 .small { font-size: 8.8pt; }
 table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 8.8pt; break-inside: avoid; }
-th, td { text-align: left; padding: 2.5px 8px 2.5px 0; vertical-align: top; border: 0; }
+th, td { text-align: left; padding: 3px 6px; vertical-align: top; border: 1px solid #000; }
 th { font-weight: 700; }
+th.grp { text-align: center; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.code { font-family: "JetBrains Mono", monospace; font-size: 8.2pt; white-space: nowrap; }
 .chip { font-family: "JetBrains Mono", monospace; font-size: 8.2pt; white-space: nowrap; }
@@ -28,17 +29,17 @@ td.code { font-family: "JetBrains Mono", monospace; font-size: 8.2pt; white-spac
 figure { margin: 6px 0 10px; break-inside: avoid; }
 figure svg { width: 100%; height: auto; display: block; }
 figcaption { font-size: 8.6pt; margin-top: 3px; }
-svg .grid { display: none; }
+svg .grid { stroke: #d6dce5; stroke-width: 1; }
 svg .axis { stroke: #000; stroke-width: 1; }
 svg .tick { font: 10px "Inter", sans-serif; fill: #000; }
 svg .lab { font: 11px "Inter", sans-serif; fill: #000; }
 svg .val { font: 10px "JetBrains Mono", monospace; fill: #000; }
-svg .thr { stroke: #000; stroke-width: 1.2; stroke-dasharray: 4 3; }
-svg .thrlab { font: 9.5px "Inter", sans-serif; fill: #000; }
+svg .thr { stroke: #b26a00; stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .thrlab { font: 9.5px "Inter", sans-serif; fill: #b26a00; }
 .legend { display: flex; gap: 14px; font-size: 8.6pt; margin: 2px 0 0; }
 .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
 .pb { break-before: page; }
-img.fig { width: 100%; filter: grayscale(1) invert(1) contrast(1.1); }
+img.fig { width: 100%; }
 </style>
 </head>
 <body>
@@ -105,21 +106,19 @@ Repository: https://github.com/a169n/fault_tolerance_endterm (full report: <code
 <p class="small">16 containers on one Docker host.</p>
 <div class="two">
   <div><h3>Inherited from the midterm</h3>
-  <ul class="small">
-    <li>Timeout 800 ms per attempt; up to 3 attempts (2 retries) with full-jitter exponential backoff (base 50 ms), each on the next replica.</li>
-    <li>Circuit breaker per pool: opens after 5 failures, half-opens after 5 s.</li>
-    <li>Health checks every 1 s take dead replicas out of rotation.</li>
-    <li>Idempotent payments (unique key) and a checkpoint + rollback sweep for interrupted payments (after 10 s).</li>
-    <li>Graceful degradation: a failed read is served from a stale cache (≤ 60 s old) as HTTP 203; reads fail over to the standby.</li>
-    <li>Restart policy (self-healing) and storage page checksums.</li>
-  </ul></div>
+  <p class="small">Timeout 800 ms per attempt; up to 3 attempts (2 retries) with full-jitter exponential backoff (base 50 ms), each on the next replica.</p>
+    <p class="small">Circuit breaker per pool: opens after 5 failures, half-opens after 5 s.</p>
+    <p class="small">Health checks every 1 s take dead replicas out of rotation.</p>
+    <p class="small">Idempotent payments (unique key) and a checkpoint + rollback sweep for interrupted payments (after 10 s).</p>
+    <p class="small">Graceful degradation: a failed read is served from a stale cache (≤ 60 s old) as HTTP 203; reads fail over to the standby.</p>
+    <p class="small">Restart policy (self-healing) and storage page checksums.</p>
+  </div>
   <div><h3>New in the endterm</h3>
-  <ul class="small">
-    <li><b>Redundant gateways.</b> nginx re-sends a failed request to the other gateway. This is safe only because every payment must carry a client <code>Idempotency-Key</code> (otherwise 400).</li>
-    <li><b>Outlier ejection.</b> A replica with 3 consecutive failures leaves rotation for 10 s; never more than half a pool.</li>
-    <li><b>Liveness vs readiness.</b> <code>/health/live</code> (process up) and <code>/health/ready</code> (dependencies up); Docker healthchecks every 2 s.</li>
-    <li><b>Auth outage degrades gracefully.</b> Tokens are verified locally at the gateway, so an auth outage blocks only new logins.</li>
-  </ul></div>
+  <p class="small"><b>Redundant gateways.</b> nginx re-sends a failed request to the other gateway. This is safe only because every payment must carry a client <code>Idempotency-Key</code> (otherwise 400).</p>
+    <p class="small"><b>Outlier ejection.</b> A replica with 3 consecutive failures leaves rotation for 10 s; never more than half a pool.</p>
+    <p class="small"><b>Liveness vs readiness.</b> <code>/health/live</code> (process up) and <code>/health/ready</code> (dependencies up); Docker healthchecks every 2 s.</p>
+    <p class="small"><b>Auth outage degrades gracefully.</b> Tokens are verified locally at the gateway, so an auth outage blocks only new logins.</p>
+  </div>
 </div>
 <p class="small"><b>Remaining single points of failure</b> (accepted): nginx, the PostgreSQL primary (no automatic failover), <code>auth-1</code>, <code>transcript-1</code>, <code>postgres-exporter</code> (the only observer for <code>DatabaseDown</code>) and the host itself. In Kubernetes the same design maps to Deployments with liveness/readiness probes, a Service per pool and outlier detection in a service mesh (discussion only; not deployed).</p>
 
@@ -215,18 +214,17 @@ Repository: https://github.com/a169n/fault_tolerance_endterm (full report: <code
 
 <h3>Key measurements (mean of 3 runs)</h3>
 <table>
-<tr><th rowspan="2">Code</th><th class="num" colspan="3">Request availability</th><th class="num" colspan="3">p95 latency, ms</th><th class="num" colspan="3">Duplicate charges (3 runs)</th></tr>
+<tr><th rowspan="2">Code</th><th class="grp" colspan="3">Request availability</th><th class="grp" colspan="3">p95 latency, ms</th><th class="grp" colspan="3">Duplicate charges (3 runs)</th></tr>
 <tr><th class="num">base</th><th class="num">mid</th><th class="num">end</th><th class="num">base</th><th class="num">mid</th><th class="num">end</th><th class="num">base</th><th class="num">mid</th><th class="num">end</th></tr>
 {{KEY_TABLE}}
 </table>
 <p class="small"><b>Data integrity.</b> Midterm and endterm, checked key by key, lost no acknowledged payment and had {{MIDEND_DUP}} duplicate charges and no orphaned payments. The baseline does not store the client key, so it could only be checked by count (no shortfall found); the baseline, which ignores the idempotency key, charged {{DUP_BASE}} client re-sends twice and left orphaned <code>pending</code> payments in E5 and E10.</p>
 
 <h3>Where the endterm is worse or the evidence is weak</h3>
-<ul class="small">
-<li><b>Cost:</b> at the 110-client peak (E6) endterm p95 was {{E6_P95_END}} ms against {{E6_P95_BASE}} / {{E6_P95_MID}} ms, while serving more requests ({{E6_RPS_END}} req/s against {{E6_RPS_BASE}} / {{E6_RPS_MID}}): the endterm's extra per-request gateway work (token, policy, limiter) shows up as a longer tail, but the second gateway changed at the same time, so the cost cannot be attributed to security alone. Still under the 1 s target.</li>
-<li><b>E2 availability:</b> the baseline scores higher ({{E2_A_BASE}} against {{E2_A_END}}) only because its clients hang and stop sending; it served {{E2_RPS_BASE}} req/s during the fault against {{E2_RPS_END}} for the endterm.</li>
-<li><b>DR7 not met:</b> in E2 <code>HighLatencyP95</code> fired in all 3 endterm runs although not expected. It is a true symptom: a replica first waits 1 s for the dead primary before reading from the standby, longer than the gateway's 800 ms attempt timeout. Endterm meets 9 of 10 requirements.</li>
-</ul>
+<p class="small"><b>Cost:</b> at the 110-client peak (E6) endterm p95 was {{E6_P95_END}} ms against {{E6_P95_BASE}} / {{E6_P95_MID}} ms, while serving more requests ({{E6_RPS_END}} req/s against {{E6_RPS_BASE}} / {{E6_RPS_MID}}): the endterm's extra per-request gateway work (token, policy, limiter) shows up as a longer tail, but the second gateway changed at the same time, so the cost cannot be attributed to security alone. Still under the 1 s target.</p>
+<p class="small"><b>E2 availability:</b> the baseline scores higher ({{E2_A_BASE}} against {{E2_A_END}}) only because its clients hang and stop sending; it served {{E2_RPS_BASE}} req/s during the fault against {{E2_RPS_END}} for the endterm.</p>
+<p class="small"><b>DR7 not met:</b> in E2 <code>HighLatencyP95</code> fired in all 3 endterm runs although not expected. It is a true symptom: a replica first waits 1 s for the dead primary before reading from the standby, longer than the gateway's 800 ms attempt timeout. Endterm meets 9 of 10 requirements.</p>
+
 
 <h3>One incident end to end (E2, endterm run r1)</h3>
 <img class="fig" src="{{FIG_DB}}" alt="Grafana dashboard during the database failure">
@@ -236,24 +234,22 @@ Repository: https://github.com/a169n/fault_tolerance_endterm (full report: <code
 <p><b>Discussion.</b> The endterm's measurable gains over the midterm are exactly where its new mechanisms act: killing a gateway no longer causes an outage, a slow replica no longer costs most of the throughput, and attacks turn from silent successes into denied, audited and alerted events. Everything the midterm already masked (crashes, node loss, interrupted payments) stays masked. The baseline shows why: without idempotency every client re-send became a second charge.</p>
 <div class="two">
 <div><h3>Limitations</h3>
-<ul class="small">
-<li>One host: all 16 containers share CPU, disk and the Docker daemon; host failure is untested.</li>
-<li>3 repetitions: enough to see spread, not enough for significance tests.</li>
-<li>Closed-loop workload flatters a system that hangs (fewer requests, fewer failures).</li>
-<li>Some criteria do not discriminate between modes (E6 and E8 pass in the baseline; E3's whole-run p95; the ledger check cannot see double charges).</li>
-<li>Detection and recovery times include window-close artefacts; per-operation recovery was derived afterwards from raw logs.</li>
-<li>The campaign measured the code before the dependency upgrade and the final review fixes; those were checked with single repetitions, not a re-run.</li>
-<li>Accepted risks: rate-limit state is per gateway (2× quota), no mTLS or public TLS, no token revocation, one shared DB role, containers run as root.</li>
-</ul></div>
+<p class="small">One host: all 16 containers share CPU, disk and the Docker daemon; host failure is untested.</p>
+<p class="small">3 repetitions: enough to see spread, not enough for significance tests.</p>
+<p class="small">Closed-loop workload flatters a system that hangs (fewer requests, fewer failures).</p>
+<p class="small">Some criteria do not discriminate between modes (E6 and E8 pass in the baseline; E3's whole-run p95; the ledger check cannot see double charges).</p>
+<p class="small">Detection and recovery times include window-close artefacts; per-operation recovery was derived afterwards from raw logs.</p>
+<p class="small">The campaign measured the code before the dependency upgrade and the final review fixes; those were checked with single repetitions, not a re-run.</p>
+<p class="small">Accepted risks: rate-limit state is per gateway (2× quota), no mTLS or public TLS, no token revocation, one shared DB role, containers run as root.</p>
+</div>
 <div><h3>Lessons learned</h3>
-<ul class="small">
-<li>Measure availability more than one way: request-based, time-based and goodput disagreed in E2, E3 and E7.</li>
-<li>Check that the baseline fails a criterion before trusting it.</li>
-<li>An "unexpected" alert is a finding: it exposed the timeout-nesting defect in E2.</li>
-<li>Read raw data before believing an aggregate; the correlation ID made that fast.</li>
-<li>Redundancy needs a safe retry contract: the nginx failover is safe only because the client sends the idempotency key.</li>
-<li>Rate limits in a replicated tier must be sized for the whole cluster.</li>
-</ul>
+<p class="small">Measure availability more than one way: request-based, time-based and goodput disagreed in E2, E3 and E7.</p>
+<p class="small">Check that the baseline fails a criterion before trusting it.</p>
+<p class="small">An "unexpected" alert is a finding: it exposed the timeout-nesting defect in E2.</p>
+<p class="small">Read raw data before believing an aggregate; the correlation ID made that fast.</p>
+<p class="small">Redundancy needs a safe retry contract: the nginx failover is safe only because the client sends the idempotency key.</p>
+<p class="small">Rate limits in a replicated tier must be sized for the whole cluster.</p>
+
 <h3>Next steps</h3>
 <p class="small">Nest the timeouts (DB acquire &lt; gateway attempt) and re-run E2; re-run the campaign on the upgraded dependencies; open-loop load for E3 and E6; shared rate-limit state; a second nginx and automatic DB failover; per-service DB roles and non-root containers.</p>
 </div>
@@ -263,16 +259,6 @@ Repository: https://github.com/a169n/fault_tolerance_endterm (full report: <code
 <p>In 90 controlled runs the endterm passed all 10 scenarios in every repetition, against 6 for the midterm configuration and 2 for the baseline. It meets 9 of its 10 requirements (DR7 missed by one unexpected but genuine alert). Across the 60 midterm and endterm runs no payment was lost, duplicated or left pending. The weak points are reported with the data that shows them rather than tuned away.</p>
 <p class="small">References: endterm and midterm assignments (<code>docs/requirements/</code>); Avižienis et al., "Basic Concepts and Taxonomy of Dependable and Secure Computing", IEEE TDSC 2004; Shostack, <i>Threat Modeling</i> (STRIDE), 2014; Nygard, <i>Release It!</i>, 2018; Beyer et al., <i>Site Reliability Engineering</i>, 2016; Schroeder et al., "Open Versus Closed: A Cautionary Tale", NSDI 2006; RFC 7519 / RFC 8725 (JWT); OWASP API Security Top 10 (2023); Prometheus, nginx, Envoy, PostgreSQL 16 and Kubernetes documentation.</p>
 
-<h2>11. Appendix</h2>
-<table>
-<tr><th>What</th><th>Where</th></tr>
-<tr><td>Full technical report (all tables, per-experiment hypotheses and observations)</td><td><code>reports/endterm/REPORT.md</code></td></tr>
-<tr><td>Results tables and raw data</td><td><code>reports/endterm/RESULTS.md</code>, <code>results.csv</code>, <code>runs/*/metrics.json</code>, <code>logs/endterm/</code></td></tr>
-<tr><td>Threat model, alerts, test plan, observability, demo</td><td><code>THREAT-MODEL.md</code>, <code>ALERTS.md</code>, <code>TEST-PLAN.md</code>, <code>OBSERVABILITY.md</code>, <code>DEMO.md</code></td></tr>
-<tr><td>Configuration</td><td><code>docker-compose.yml</code>, <code>config/nginx</code>, <code>config/prometheus</code>, <code>config/grafana</code>, <code>config/postgres</code></td></tr>
-<tr><td>Code: mechanisms, security, services</td><td><code>app/fault_tolerance/</code>, <code>app/security/</code>, <code>app/services/</code></td></tr>
-<tr><td>Tests and fault injection</td><td><code>tests/unit</code>, <code>tests/integration</code>, <code>experiments/</code> (<code>npm run exp &lt;scenario&gt;</code>, <code>npm run campaign -- --reps 3</code>, <code>npm run demo</code>)</td></tr>
-</table>
 <h3>Contribution</h3>
 <p class="small">Aibyn Talgatov defined the endterm scope from the assignment, reviewed and approved the implementation plan (including the three-mode comparison and the ten experiments), directed its execution task by task, managed the repository, CI and the move to <code>a169n/fault_tolerance_endterm</code>, and set the scope and format of this report. The implementation was produced with an AI coding assistant (Claude Code); every change was checked by automated tests and independent review before it was merged. The system extends the team's midterm project.</p>
 
