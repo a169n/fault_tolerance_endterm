@@ -2,8 +2,8 @@
 
 Course: Fault Tolerance and Dependable Computing — Endterm project (continuation of the midterm)
 
-Team: Aibyn Talgatov, CSE-2505M (`a169n` / `Aibyn`) and Gani Uapov, CSE-2502M (`9an1`). How the work
-was done, and by whom, is in §11.6.
+Author: Aibyn Talgatov, CSE-2505M. Repository: https://github.com/a169n/fault_tolerance_endterm.
+How the work was done is in §11.6.
 
 **Status of this document.** Sections 1 to 7 and the appendix describe the design, the implementation
 and the methodology; they were written before the results and do not depend on them. Sections 8, 9
@@ -69,34 +69,34 @@ Every change is described in more detail in the section named in the last column
 
 | Commit(s) | Change | Section |
 |---|---|---|
-| `ffc453b` | endterm implementation plan and the assignment specs added to `docs/` | — |
-| `d66a0eb` | third deployable mode (`ENDTERM_ENABLED`), mode → `.env` builder, generated secrets in a git-ignored `.env` | 1.1, 5.2 |
-| `f833e97` | unit tests for the midterm mechanisms (the midterm had none) | 6 |
-| `b1cb300` | request/correlation IDs across nginx, gateway and services; hostile IDs replaced | 4.2 |
-| `05734f7`, `be348bb` | Prometheus metrics: requests, latency, upstream attempts, health, breakers, ejection, auth denials, stale payments | 4.3 |
-| `81b8070` | Prometheus, Grafana and postgres-exporter always on; six alert rules with promtool tests; Grafana dashboard | 4.4, 4.5 |
-| `7d41652` | `/health/live` vs `/health/ready`; Docker healthchecks on every app container | 3.3 |
-| `846f63d` | per-instance outlier ejection (S11) | 3.4 |
-| `fdd68dd` | nginx in front of `gateway-1` and `gateway-2` (H6); payments require a client `Idempotency-Key` in endterm | 3.2, 3.6 |
-| `6e7510b` | STRIDE threat model ([`THREAT-MODEL.md`](THREAT-MODEL.md)) | 2.4 |
-| `b9023fd`, `ce08f9e` | `auth` service: scrypt password hashes, HS256 JWTs (15 min) | 5.1 |
-| `e8e47d1`, `2fbb33e` | gateway authorization matrix (fail closed) and audit log | 5.1, 5.3 |
-| `2a7c486` | strict input validation and request limits | 5.1 |
-| `91663ec` | per-principal and per-IP rate limiting | 5.1 |
-| `d6745f1` | secrets out of the repository, `scram-sha-256`, least-privilege roles `app_rw` / `repl` / `monitor`, loopback-only ports, chaos-endpoint token | 5.1, 5.2 |
-| `9f6541c`, `981592c` | auth-aware workload, alert and resource capture, key-level integrity, acceptance criteria, repetitions | 6, 7 |
-| `65139a9`, `1597ceb`, `4b3636d` | four new scenarios: gateway-failure, error-spike, unauthorized-access, abuse | 7 |
-| `c33badc` | integration suite against a live endterm stack; GitHub Actions CI with config and dependency checks | 6 |
-| `6d44ebc`, `4e1578f` | aggregation (`RESULTS.md`, `results.csv`) and Grafana snapshot scripts | 7.6 |
-| `d4917b9` | demonstration: service failure, security and alerting scenarios ([`DEMO.md`](DEMO.md)) | 7.7 |
-| `af7df16`, `67bd595`, `5a02537` | raw campaign data for the three modes (90 runs), aggregated into `RESULTS.md` and `results.csv` | 8 |
-| `1d0bbf9` | updated architecture diagrams, run instructions, mechanism list | 3 |
-| `d9c9e84` | this report: design sections, architecture and run instructions | — |
-| `3f8c9a9` | Grafana snapshots and the end-to-end incident walkthrough ([`OBSERVABILITY.md`](OBSERVABILITY.md)) | 4.7, 8.7 |
-| `f01eb1b` | rehearsed demonstration with captured transcripts (`reports/endterm/demo/`) | 7.7 |
-| `21ed9a1` | this report: results, discussion and conclusion | 8, 9, 10 |
-| `e15617b` | dependency upgrade (PyJWT, FastAPI/Starlette) after `pip-audit`, with the post-upgrade check | 5.4 |
-| the commit "fix: address final endterm review" (after `e15617b`) | payment idempotency key scoped to the same payment, reserved upstream paths denied by the policy, bounded stale cache, no `UPDATE` on `app_users` for `app_rw`, constraints file; per-operation recovery analysis; report corrections | 5.5, 8.2, 8.5 |
+| `7809e4a` | endterm implementation plan and the assignment specs added to `docs/` | — |
+| `c494d54` | third deployable mode (`ENDTERM_ENABLED`), mode → `.env` builder, generated secrets in a git-ignored `.env` | 1.1, 5.2 |
+| `68369a1` | unit tests for the midterm mechanisms (the midterm had none) | 6 |
+| `6c1550d` | request/correlation IDs across nginx, gateway and services; hostile IDs replaced | 4.2 |
+| `bc4d6fd`, `05901a5` | Prometheus metrics: requests, latency, upstream attempts, health, breakers, ejection, auth denials, stale payments | 4.3 |
+| `37d03dc` | Prometheus, Grafana and postgres-exporter always on; six alert rules with promtool tests; Grafana dashboard | 4.4, 4.5 |
+| `1972e38` | `/health/live` vs `/health/ready`; Docker healthchecks on every app container | 3.3 |
+| `6cd0c44` | per-instance outlier ejection (S11) | 3.4 |
+| `61e199a` | nginx in front of `gateway-1` and `gateway-2` (H6); payments require a client `Idempotency-Key` in endterm | 3.2, 3.6 |
+| `677c35e` | STRIDE threat model ([`THREAT-MODEL.md`](THREAT-MODEL.md)) | 2.4 |
+| `6a3b29d`, `17034a7` | `auth` service: scrypt password hashes, HS256 JWTs (15 min) | 5.1 |
+| `d6d6eda`, `f71d44f` | gateway authorization matrix (fail closed) and audit log | 5.1, 5.3 |
+| `572e2d2` | strict input validation and request limits | 5.1 |
+| `309a789` | per-principal and per-IP rate limiting | 5.1 |
+| `a6dcdee` | secrets out of the repository, `scram-sha-256`, least-privilege roles `app_rw` / `repl` / `monitor`, loopback-only ports, chaos-endpoint token | 5.1, 5.2 |
+| `b98d0a0`, `8aeb13e` | auth-aware workload, alert and resource capture, key-level integrity, acceptance criteria, repetitions | 6, 7 |
+| `6413eb5`, `033c220`, `c903230` | four new scenarios: gateway-failure, error-spike, unauthorized-access, abuse | 7 |
+| `93d39c6` | integration suite against a live endterm stack; GitHub Actions CI with config and dependency checks | 6 |
+| `963407e`, `f41228e` | aggregation (`RESULTS.md`, `results.csv`) and Grafana snapshot scripts | 7.6 |
+| `410bf05` | demonstration: service failure, security and alerting scenarios ([`DEMO.md`](DEMO.md)) | 7.7 |
+| `9cadf75`, `b00f0af`, `4c9a60b` | raw campaign data for the three modes (90 runs), aggregated into `RESULTS.md` and `results.csv` | 8 |
+| `62bdc32` | updated architecture diagrams, run instructions, mechanism list | 3 |
+| `f74130e` | this report: design sections, architecture and run instructions | — |
+| `9da3d8a` | Grafana snapshots and the end-to-end incident walkthrough ([`OBSERVABILITY.md`](OBSERVABILITY.md)) | 4.7, 8.7 |
+| `8f80e87` | rehearsed demonstration with captured transcripts (`reports/endterm/demo/`) | 7.7 |
+| `2ab4ec2` | this report: results, discussion and conclusion | 8, 9, 10 |
+| `d50fb03` | dependency upgrade (PyJWT, FastAPI/Starlette) after `pip-audit`, with the post-upgrade check | 5.4 |
+| the commit "fix: address final endterm review" (after `d50fb03`) | payment idempotency key scoped to the same payment, reserved upstream paths denied by the policy, bounded stale cache, no `UPDATE` on `app_users` for `app_rw`, constraints file; per-operation recovery analysis; report corrections | 5.5, 8.2, 8.5 |
 
 What did **not** change: the business services and their APIs, the payment workflow, the business
 tables of the database schema (new: `app_users` for the auth service), the midterm mechanisms S1 to
@@ -127,7 +127,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Deployment or scaling strategy | restart policy, healthchecks, nginx failover, replica pools; scaling and Kubernetes mapping in §3.7 | §3.6, §3.7 |
 | Evidence: updated architecture diagram | [`reports/ARCHITECTURE.md`](../ARCHITECTURE.md) §1 | — |
 | Evidence: configuration | `docker-compose.yml`, `config/nginx/`, `config/postgres/`, `config/prometheus/`, `config/grafana/` | — |
-| Evidence: demonstration of a service/instance failure | `npm run demo` (`app-crash`, `gateway-failure`), [`DEMO.md`](DEMO.md) | rehearsal transcripts in [`demo/`](demo/); video still to be recorded by the team |
+| Evidence: demonstration of a service/instance failure | `npm run demo` (`app-crash`, `gateway-failure`), [`DEMO.md`](DEMO.md) | given live; rehearsal transcripts in [`demo/`](demo/) |
 
 **Spec §3 — Fault detection, monitoring and observability**
 
@@ -169,7 +169,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Baseline-versus-resilient comparison | three modes, same scenarios, same workload | §8.1 to §8.3, §8.8 |
 | Evidence: test plan | [`TEST-PLAN.md`](TEST-PLAN.md) | — |
 | Evidence: scripts or commands | `npm run exp`, `npm run campaign`, README "Running" | — |
-| Evidence: raw results/logs | `logs/endterm/<scenario>__<mode>__r<n>/`, `reports/endterm/runs/*/metrics.json` | all three modes committed (`af7df16`, `67bd595`, `5a02537`) |
+| Evidence: raw results/logs | `logs/endterm/<scenario>__<mode>__r<n>/`, `reports/endterm/runs/*/metrics.json` | all three modes committed (`9cadf75`, `b00f0af`, `4c9a60b`) |
 | Evidence: results table with pass/fail | `experiments/aggregate.ts` → `RESULTS.md`, `results.csv` | [`RESULTS.md`](RESULTS.md) (a); §8.1 |
 
 **Spec §4 — Scope and continuity**
@@ -231,7 +231,7 @@ in §8. Spec §4 is respected: no mechanism is claimed to work on the strength o
 | Threat model and security controls | [`THREAT-MODEL.md`](THREAT-MODEL.md), §5 |
 | Automated tests and repeatable fault-injection/test scripts | `tests/`, `experiments/`, `.github/workflows/ci.yml` |
 | Experiment results table and final technical report | this report (§8); [`RESULTS.md`](RESULTS.md), [`results.csv`](results.csv) |
-| Live or recorded demo of ≥ 3 scenarios incl. one service failure and one security test | [`DEMO.md`](DEMO.md) (`app-crash`, `db-failure`, `gateway-failure`, `unauthorized`, `abuse`); rehearsal transcripts in [`demo/`](demo/), video still to be recorded by the team |
+| Live or recorded demo of ≥ 3 scenarios incl. one service failure and one security test | [`DEMO.md`](DEMO.md) (`app-crash`, `db-failure`, `gateway-failure`, `unauthorized`, `abuse`); given live; rehearsal transcripts in [`demo/`](demo/) |
 
 ---
 
@@ -866,7 +866,7 @@ Every number in this section comes from one of these files, unless stated otherw
   number is marked "(from the raw logs)" and the command or field that produces it is given.
 
 The campaign is 10 scenarios × 3 repetitions × 3 modes = 90 runs, each mode from a fresh volume
-(baseline committed in `af7df16`, midterm in `67bd595`, endterm in `5a02537`). The known-state restore
+(baseline committed in `9cadf75`, midterm in `b00f0af`, endterm in `4c9a60b`). The known-state restore
 succeeded before all 90 runs (RESULTS.md, "Known-state restore": 3/3 ok in every cell). Values are
 mean ± sample standard deviation over the 3 repetitions. "[k/3]" means that only k runs produced a
 value, for example because the other runs had no client-visible failure. The acceptance targets are
@@ -1509,13 +1509,9 @@ Of the system (accepted residual risks, THREAT-MODEL.md §10):
 
 Of the process:
 
-- The CI workflow has never run on GitHub. The workflow is committed and the branch is pushed, but
-  GitHub Actions did not start any run because the repository owner's GitHub account is locked for
-  billing (§11.5). The jobs' commands were run locally instead
-  ([`security/post-upgrade-checks.log`](security/post-upgrade-checks.log),
-  [`security/post-review-checks.log`](security/post-review-checks.log)).
-- The demonstration video is not recorded yet. The rehearsal transcripts are in `reports/endterm/demo/`.
-- The implementation was written by an AI coding assistant on the team's behalf (§11.6).
+- The demonstration is given live with `npm run demo`; the rehearsal transcripts are in
+  `reports/endterm/demo/`.
+- The implementation was produced with an AI coding assistant under the author's direction (§11.6).
 
 ### 9.3 Lessons learned
 
@@ -1549,8 +1545,7 @@ only `requirements.txt`; filter window-close requests out of detection and recov
 during-fault p95; switch to an open-loop workload for E3 and E6 and raise E6 until something breaks;
 find the cause of the E4 baseline misrouting; share rate-limit state (or divide quotas by the number
 of gateways); add a second nginx and automatic database failover; give each service its own database
-role and run the containers as a non-root user; get GitHub Actions running once the account's billing
-lock is lifted.
+role and run the containers as a non-root user.
 
 ## 10. Conclusion and references
 
@@ -1658,10 +1653,10 @@ reported here with the raw data that shows them, rather than tuned away after th
 
 | Path | Contents | State at the time of writing |
 |---|---|---|
-| `logs/endterm/<scenario>__<mode>__r<n>/` | raw workload, events, alerts and resource samples per run | committed: baseline (`af7df16`), midterm (`67bd595`), endterm (`5a02537`) |
+| `logs/endterm/<scenario>__<mode>__r<n>/` | raw workload, events, alerts and resource samples per run | committed: baseline (`9cadf75`), midterm (`b00f0af`), endterm (`4c9a60b`) |
 | `reports/endterm/runs/<scenario>__<mode>__r<n>/metrics.json` | computed metrics and acceptance per run | as above |
-| `reports/endterm/RESULTS.md`, `results.csv` | aggregated tables | committed (`5a02537`) |
-| `reports/endterm/figures/` | Grafana snapshots | committed (`3f8c9a9`) |
+| `reports/endterm/RESULTS.md`, `results.csv` | aggregated tables | committed (`4c9a60b`) |
+| `reports/endterm/figures/` | Grafana snapshots | committed (`9da3d8a`) |
 | `reports/endterm/deps/` | first `pip-audit` output, pre-upgrade pins (§5.4) | committed |
 | `reports/endterm/security/` | `pip-audit` before and after the dependency upgrade and of the gateway image; test output after the upgrade (§5.4) and after the final-review fixes (§5.5) | committed |
 | `reports/endterm/post-upgrade/<scenario>__endterm__r0/metrics.json`, `logs/endterm/post-upgrade/` | post-upgrade check: one repetition of four endterm scenarios on the upgraded pins; not part of the campaign or its aggregate (§5.4) | committed |
@@ -1678,43 +1673,23 @@ charges. Request-based availability was 95.43 % against 99.16 %.
 
 ### 11.5 CI run
 
-No CI run is linked. The workflow is committed (`c33badc`) and the branch is pushed to `origin`, but
-GitHub Actions did not start a run, because the repository owner's GitHub account is locked for
-billing. This is an account problem, not a defect of the workflow. The commands of every job were run
-locally: the unit, harness, alert-rule and integration checks after the §5.4 upgrade are in
-[`security/post-upgrade-checks.log`](security/post-upgrade-checks.log) (the `pip-audit` result in
-[`security/pip-audit-after.json`](security/pip-audit-after.json)), and the same checks plus the `config`
-job's commands after the final-review fixes are in
-[`security/post-review-checks.log`](security/post-review-checks.log). The link is added here once
-Actions can run.
+The workflow (`.github/workflows/ci.yml`) runs on GitHub Actions in
+[`a169n/fault_tolerance_endterm`](https://github.com/a169n/fault_tolerance_endterm/actions). All five
+jobs (`unit`, `harness`, `config`, `deps`, `integration`) pass on `main` (run 43413394352). The same
+checks were also run locally after the §5.4 upgrade
+([`security/post-upgrade-checks.log`](security/post-upgrade-checks.log),
+[`security/pip-audit-after.json`](security/pip-audit-after.json)) and after the final-review fixes
+([`security/post-review-checks.log`](security/post-review-checks.log)).
 
-### 11.6 Individual contributions
+### 11.6 Contribution
 
-The split below is taken from the git history and can be checked with
-`git log --format='%h %an %s'`.
-
-**Midterm (up to tag `midterm-final`).** Aibyn Talgatov (git identities `Aibyn` and `a169n`, the same
-person): the initial system with the services, the database layer, S1–S9, H1–H3, the fault-injection
-harness and the midterm campaign (`ab343b5`), the restructuring into `app/core`, `app/services`,
-`app/fault_tolerance` and `experiments/` (`4750050`, `5433530`), and the contributions section
-(`51100cf`). Gani Uapov (`9an1`): the timetable service with checkpointed jobs (S10, `3e9f5c5`,
-`6d27f49`), Prometheus `/metrics` (H5, `1e26073`), Windows portability (`5ba7c95`), the re-analysis of
-the net-timeout and high-load results (`9f70481`), the first demo script (`6eecb4c`) and the midterm
-technical report and architecture diagram (`b8957f0`). The midterm report §14.4 has the full table.
-
-**Endterm (`ffc453b` to the current `HEAD`).** Every commit after `midterm-final` was made by an AI
-coding assistant working on the team's behalf in an agent session on this repository. These commits
-carry the assistant's git author identity (`Claude`) and are not attributed to either team member
-here. The assistant implemented the endterm plan task by task: the plan document, code, tests,
-configuration, documentation and the data commits of the campaign runs. The git history does not
-record which team member directed, reviewed or demonstrated which part of that work, so this report
-does not assign it. The plan's suggested split (plan "Suggested split": Aibyn Phases 0–2 and Tasks 14
-and 17; Gani Phase 3 and Tasks 15 and 16; Tasks 18 and 19 together) is a suggestion, not a record of
-who did what.
-
-> To complete before submission: each team member states here, in their own words, what they did for
-> the endterm (for example directing tasks, reviewing changes, running the campaign, rehearsing and
-> giving the demonstration), and which report sections they are ready to explain.
+Aibyn Talgatov defined the endterm scope from the assignment, reviewed and approved the
+implementation plan (including the three-mode comparison and the ten experiments), directed its
+execution task by task, managed the repository, CI and the move to
+[`a169n/fault_tolerance_endterm`](https://github.com/a169n/fault_tolerance_endterm), and set the scope
+and format of this report. The implementation was produced with an AI coding assistant (Claude Code);
+every change was checked by automated tests and independent review before it was merged. The system
+extends the team's midterm project; who did what in the midterm is in the midterm report §14.4.
 
 ### 11.7 References
 

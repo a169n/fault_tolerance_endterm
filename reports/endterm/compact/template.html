@@ -4,108 +4,70 @@
 <meta charset="utf-8">
 <title>Resilient University Information System — Endterm Report</title>
 <style>
-@page { size: A4; margin: 16mm 15mm 16mm 15mm; }
-:root {
-  --ink: #15202e; --muted: #5a6577; --line: #d6dce5; --soft: #f1f4f8;
-  --accent: #1f4fbf; --accent-soft: #e6ecfa;
-  --pass: #136c42; --pass-bg: #ddf2e6; --fail: #a51d26; --fail-bg: #fbe2e3;
-  --c-base: #a7afbd; --c-mid: #7d91c6; --c-end: #1f4fbf;
-}
+@page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+:root { --c-base: #c4c4c4; --c-mid: #7a7a7a; --c-end: #000000; }
 * { box-sizing: border-box; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { font-family: "Inter", "Liberation Sans", sans-serif; font-size: 9.6pt; line-height: 1.45; color: var(--ink); margin: 0; }
-h1 { font-family: "Inter Display", "Inter", sans-serif; font-size: 21pt; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
-h2 { font-family: "Inter Display", "Inter", sans-serif; font-size: 13.5pt; margin: 18px 0 6px; font-weight: 650; break-after: avoid; }
-h2 .n { color: var(--accent); margin-right: 6px; font-variant-numeric: tabular-nums; }
-h3 { font-size: 10pt; margin: 10px 0 4px; font-weight: 650; break-after: avoid; }
+body { font-family: "Inter", "Liberation Sans", sans-serif; font-size: 9.8pt; line-height: 1.45; color: #000; background: #fff; margin: 0; }
+h1 { font-size: 19pt; line-height: 1.2; margin: 0 0 4px; font-weight: 700; }
+h2 { font-size: 13pt; margin: 18px 0 6px; font-weight: 700; break-after: avoid; }
+h3 { font-size: 10pt; margin: 10px 0 4px; font-weight: 700; break-after: avoid; }
 p { margin: 0 0 6px; }
 ul { margin: 0 0 6px; padding-left: 16px; }
 li { margin: 0 0 2px; }
-code, .mono { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 8.3pt; }
-code { background: var(--soft); padding: 0 3px; border-radius: 3px; }
-.muted { color: var(--muted); }
-.small { font-size: 8.4pt; }
-table { border-collapse: collapse; width: 100%; margin: 4px 0 8px; font-size: 8.5pt; break-inside: avoid; }
-th, td { text-align: left; padding: 3.5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-weight: 600; color: var(--muted); font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1.5px solid var(--ink); }
+code, .mono { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 8.4pt; }
+.small { font-size: 8.8pt; }
+table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 8.8pt; break-inside: avoid; }
+th, td { text-align: left; padding: 2.5px 8px 2.5px 0; vertical-align: top; border: 0; }
+th { font-weight: 700; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-td.code { font-family: "JetBrains Mono", monospace; font-size: 8pt; color: var(--muted); white-space: nowrap; }
-td.kind { color: var(--muted); font-size: 8pt; }
-.chip { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 7.6pt; padding: 0 6px; border-radius: 8px; white-space: nowrap; }
-.chip.pass { color: var(--pass); background: var(--pass-bg); }
-.chip.fail { color: var(--fail); background: var(--fail-bg); }
-.head { border-bottom: 2px solid var(--ink); padding-bottom: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
-.eyebrow { font-family: "JetBrains Mono", monospace; font-size: 7.8pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
-.meta { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 8.4pt; color: var(--muted); }
-.meta b { color: var(--ink); font-weight: 600; }
-.glance { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 4px; }
-.stat { background: var(--soft); border-radius: 6px; padding: 8px 10px; }
-.stat .v { font-family: "Inter Display", sans-serif; font-size: 16pt; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.stat .v small { font-size: 9pt; font-weight: 500; color: var(--muted); }
-.stat .k { font-size: 8pt; color: var(--muted); line-height: 1.3; margin-top: 2px; }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.box { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; break-inside: avoid; }
-.box h3 { margin-top: 0; }
-.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 6px 10px; margin: 6px 0 8px; break-inside: avoid; }
-.warn { border-left-color: #b26a00; background: #fdf1dc; }
-figure { margin: 6px 0 8px; break-inside: avoid; }
+td.code { font-family: "JetBrains Mono", monospace; font-size: 8.2pt; white-space: nowrap; }
+.chip { font-family: "JetBrains Mono", monospace; font-size: 8.2pt; white-space: nowrap; }
+.chip.pass { font-weight: 700; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+figure { margin: 6px 0 10px; break-inside: avoid; }
 figure svg { width: 100%; height: auto; display: block; }
-figcaption { font-size: 8pt; color: var(--muted); margin-top: 3px; }
-svg .grid { stroke: var(--line); stroke-width: 1; }
-svg .axis { stroke: var(--ink); stroke-width: 1; }
-svg .tick { font: 10px "Inter", sans-serif; fill: var(--muted); }
-svg .lab { font: 11px "Inter", sans-serif; fill: var(--ink); }
-svg .val { font: 10px "JetBrains Mono", monospace; fill: var(--ink); }
-svg .thr { stroke: #b26a00; stroke-width: 1.5; stroke-dasharray: 4 3; }
-svg .thrlab { font: 9px "Inter", sans-serif; fill: #b26a00; }
-.legend { display: flex; gap: 14px; font-size: 8pt; color: var(--muted); margin: 2px 0 0; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-.arch { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 8.3pt; break-inside: avoid; }
-.tier { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; }
-.tier .lbl { font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); text-align: right; }
-.nodes { display: flex; flex-wrap: wrap; gap: 5px; }
-.node { border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; background: #fff; }
-.node.new { border-color: var(--accent); background: var(--accent-soft); }
-.node b { font-weight: 600; }
-.qa { break-inside: avoid; margin-bottom: 7px; }
-.qa .q { font-weight: 650; }
-.qa .a { margin: 1px 0 0; }
+figcaption { font-size: 8.6pt; margin-top: 3px; }
+svg .grid { display: none; }
+svg .axis { stroke: #000; stroke-width: 1; }
+svg .tick { font: 10px "Inter", sans-serif; fill: #000; }
+svg .lab { font: 11px "Inter", sans-serif; fill: #000; }
+svg .val { font: 10px "JetBrains Mono", monospace; fill: #000; }
+svg .thr { stroke: #000; stroke-width: 1.2; stroke-dasharray: 4 3; }
+svg .thrlab { font: 9.5px "Inter", sans-serif; fill: #000; }
+.legend { display: flex; gap: 14px; font-size: 8.6pt; margin: 2px 0 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
 .pb { break-before: page; }
-.fill { border: 1.5px dashed var(--muted); border-radius: 6px; padding: 8px 10px; min-height: 52px; color: var(--muted); }
-img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
+img.fig { width: 100%; filter: grayscale(1) invert(1) contrast(1.1); }
 </style>
 </head>
 <body>
 
-<div class="head">
-  <span class="eyebrow">Fault Tolerance and Dependable Computing · Endterm project · compact report</span>
-  <h1>Resilient University Information System</h1>
-  <div class="meta">
-    <span>Team <b>Aibyn Talgatov (CSE-2505M), Gani Uapov (CSE-2502M)</b></span>
-    <span>Repository <b>github.com/a169n/fault_tolerance_endterm</b></span>
-    <span>Full report <b>reports/endterm/REPORT.md</b></span>
-  </div>
-</div>
+<h1>Resilient University Information System</h1>
+<p>Endterm project report · Fault Tolerance and Dependable Computing<br>
+Aibyn Talgatov (CSE-2505M)<br>
+Repository: https://github.com/a169n/fault_tolerance_endterm (full report: <code>reports/endterm/REPORT.md</code>)</p>
 
-<div class="glance">
-  <div class="stat"><div class="v">{{P_END}}<small>/10</small></div><div class="k">scenarios passed by the endterm, against {{P_MID}} (midterm) and {{P_BASE}} (baseline)</div></div>
-  <div class="stat"><div class="v">90</div><div class="k">controlled runs: 10 scenarios × 3 modes × 3 repetitions, none aborted</div></div>
-  <div class="stat"><div class="v">{{MIDEND_BAD}}</div><div class="k">duplicate or lost payments in midterm and endterm; the baseline double-charged {{DUP_BASE}} times</div></div>
-  <div class="stat"><div class="v">63<small>/63</small></div><div class="k">attacks per E9 run denied and audited in endterm; 0 denied in the other modes</div></div>
-</div>
+<h3>Key results</h3>
+<table>
+<tr><td class="num" style="width:70px">{{P_END}} / 10</td><td>scenarios passed by the endterm, against {{P_MID}} (midterm) and {{P_BASE}} (baseline)</td></tr>
+<tr><td class="num">90</td><td>controlled runs: 10 scenarios × 3 modes × 3 repetitions, none aborted</td></tr>
+<tr><td class="num">{{MIDEND_BAD}}</td><td>duplicate or lost payments in midterm and endterm; the baseline double-charged {{DUP_BASE}} times</td></tr>
+<tr><td class="num">63 / 63</td><td>attacks per E9 run denied and audited in the endterm; none denied in the other modes</td></tr>
+</table>
 
-<h2><span class="n">1</span>Introduction and relationship to the midterm</h2>
+<h2>1. Introduction and relationship to the midterm</h2>
 <p>The midterm built a university platform (students, payments, transcripts, timetables) with software fault tolerance: retries with backoff, timeouts, a circuit breaker, health checks, idempotent payments, checkpoint and rollback, graceful degradation, replicas and a database standby. The endterm extends the same system, as the assignment requires, with four new layers: cloud/microservice resilience, observability with alerting, security with intrusion tolerance, and systematic verification by fault injection.</p>
-<div class="callout"><b>One codebase, three modes.</b> Every container runs the same image; two switches select the behaviour. A measured difference between modes is therefore caused by the mechanisms, not by different code.
-<table style="margin:4px 0 0">
+<p><b>One codebase, three modes.</b> Every container runs the same image; two switches select the behaviour. A measured difference between modes is therefore caused by the mechanisms, not by different code.</p>
+<table>
 <tr><th>Mode</th><th>Switches</th><th>Behaviour</th></tr>
 <tr><td><b>baseline</b></td><td class="mono">FT=0 ENDTERM=0</td><td>Same replicas and standby, but nothing uses them: no retries, timeouts, idempotency or security.</td></tr>
 <tr><td><b>midterm</b></td><td class="mono">FT=1 ENDTERM=0</td><td>The midterm mechanisms S1–S10 and H1–H5, unchanged (tag <code>midterm-final</code> = commit <code>51100cf</code>).</td></tr>
 <tr><td><b>endterm</b></td><td class="mono">FT=1 ENDTERM=1</td><td>Midterm plus redundant gateways, outlier ejection, JWT authentication, authorization, validation, rate limiting and audit.</td></tr>
 </table>
-<p class="small muted" style="margin:4px 0 0">Monitoring (metrics, structured logs, correlation IDs, Prometheus, Grafana, alerts) and credential hygiene are on in all three modes, so all modes are measured the same way. Deploy with <code>npm run up:baseline | up:midterm | up:endterm</code>.</p></div>
+<p>Monitoring (metrics, structured logs, correlation IDs, Prometheus, Grafana, alerts) and credential hygiene are on in all three modes, so all modes are measured the same way. Deploy with <code>npm run up:baseline | up:midterm | up:endterm</code>.</p>
 
-<h2><span class="n">2</span>Requirements, assumptions and threat model</h2>
+<h2>2. Requirements, assumptions and threat model</h2>
 <p>Each requirement can be checked by an experiment or a test. The thresholds are fixed before the campaign and applied unchanged to all three modes.</p>
 <table>
 <tr><th>#</th><th>Requirement (endterm target)</th><th>Checked by</th></tr>
@@ -131,17 +93,18 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 <tr><td>Host</td><td>committed secrets, exposed ports, vulnerable dependencies</td><td>generated secrets, loopback-only ports, pinned versions, <code>pip-audit</code></td></tr>
 </table>
 
-<h2><span class="n">3</span>Cloud/microservices architecture and resilience design</h2>
-<div class="arch">
-  <div class="tier"><span class="lbl">Entry</span><div class="nodes"><span class="node new"><b>nginx</b> :8080 · failover between gateways · blocks /metrics, /chaos</span></div></div>
-  <div class="tier"><span class="lbl">Gateway tier</span><div class="nodes"><span class="node new"><b>gateway-1</b></span><span class="node new"><b>gateway-2</b></span><span class="node">JWT check · policy · rate limit · retry · timeout · breaker · ejection · stale cache</span></div></div>
-  <div class="tier"><span class="lbl">Services</span><div class="nodes"><span class="node new"><b>auth-1</b> issues JWT</span><span class="node"><b>student</b> ×2</span><span class="node"><b>payment</b> ×2</span><span class="node"><b>timetable</b> ×2</span><span class="node"><b>transcript</b> ×1</span></div></div>
-  <div class="tier"><span class="lbl">Data</span><div class="nodes"><span class="node"><b>PostgreSQL primary</b> (writes)</span><span class="node"><b>hot standby</b> (WAL streaming; reads on failover)</span></div></div>
-  <div class="tier"><span class="lbl">Monitoring</span><div class="nodes"><span class="node new"><b>Prometheus</b> + 6 alert rules</span><span class="node new"><b>Grafana</b> dashboard</span><span class="node new"><b>postgres-exporter</b></span></div></div>
-  <p class="small muted" style="margin:0">16 containers on one Docker host. Blue boxes are new in the endterm.</p>
-</div>
-<div class="two" style="margin-top:8px">
-  <div class="box"><h3>Inherited from the midterm</h3>
+<h2>3. Cloud/microservices architecture and resilience design</h2>
+<table>
+<tr><th>Tier</th><th>Components (new in the endterm marked *)</th></tr>
+<tr><td>Entry</td><td>nginx* on :8080: failover between gateways, blocks /metrics and /chaos</td></tr>
+<tr><td>Gateway tier</td><td>gateway-1*, gateway-2*: JWT check, policy, rate limit, retry, timeout, breaker, ejection, stale cache</td></tr>
+<tr><td>Services</td><td>auth-1* (issues JWTs), student ×2, payment ×2, timetable ×2, transcript ×1</td></tr>
+<tr><td>Data</td><td>PostgreSQL primary (writes), hot standby (WAL streaming; reads on failover)</td></tr>
+<tr><td>Monitoring</td><td>Prometheus* with 6 alert rules, Grafana* dashboard, postgres-exporter*</td></tr>
+</table>
+<p class="small">16 containers on one Docker host.</p>
+<div class="two">
+  <div><h3>Inherited from the midterm</h3>
   <ul class="small">
     <li>Timeout 800 ms per attempt; up to 3 attempts (2 retries) with full-jitter exponential backoff (base 50 ms), each on the next replica.</li>
     <li>Circuit breaker per pool: opens after 5 failures, half-opens after 5 s.</li>
@@ -150,7 +113,7 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
     <li>Graceful degradation: a failed read is served from a stale cache (≤ 60 s old) as HTTP 203; reads fail over to the standby.</li>
     <li>Restart policy (self-healing) and storage page checksums.</li>
   </ul></div>
-  <div class="box"><h3>New in the endterm</h3>
+  <div><h3>New in the endterm</h3>
   <ul class="small">
     <li><b>Redundant gateways.</b> nginx re-sends a failed request to the other gateway. This is safe only because every payment must carry a client <code>Idempotency-Key</code> (otherwise 400).</li>
     <li><b>Outlier ejection.</b> A replica with 3 consecutive failures leaves rotation for 10 s; never more than half a pool.</li>
@@ -160,7 +123,7 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 </div>
 <p class="small"><b>Remaining single points of failure</b> (accepted): nginx, the PostgreSQL primary (no automatic failover), <code>auth-1</code>, <code>transcript-1</code>, <code>postgres-exporter</code> (the only observer for <code>DatabaseDown</code>) and the host itself. In Kubernetes the same design maps to Deployments with liveness/readiness probes, a Service per pool and outlier detection in a service mesh (discussion only; not deployed).</p>
 
-<h2><span class="n">4</span>Monitoring, logging, metrics and alerting</h2>
+<h2>4. Monitoring, logging, metrics and alerting</h2>
 <div class="two">
   <div>
   <p><b>Structured logs.</b> Every service writes one JSON line per event with <code>ts, svc, mode, kind, rid, level</code>.</p>
@@ -178,12 +141,12 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
   <tr><td>AuthFailureSpike</td><td>&gt; 2 denials/s (30 s) for 4 s</td><td>possible attack: review audit by rid/sub</td></tr>
   <tr><td>PaymentsStuckPending</td><td>pending &gt; 15 s for 10 s</td><td>confirm rollback sweep; reconcile</td></tr>
   </table>
-  <p class="small muted">All six rules have <code>promtool</code> unit tests. Measured mean detection delay in the endterm runs (injection → alert firing):</p>
+  <p class="small">All six rules have <code>promtool</code> unit tests. Measured mean detection delay in the endterm runs (injection → alert firing):</p>
   <table><tr><th>Alert (scenario)</th><th class="num">Detection</th></tr>{{DET_ROWS}}</table>
   </div>
 </div>
 
-<h2><span class="n">5</span>Security controls and intrusion-tolerance strategy</h2>
+<h2>5. Security controls and intrusion-tolerance strategy</h2>
 <table>
 <tr><th>Control</th><th>How it works</th><th>Proof</th></tr>
 <tr><td>Authentication</td><td>Auth service checks scrypt password hashes and issues HS256 JWTs (15 min; issuer and audience checked; only HS256 accepted, so <code>alg:none</code> fails)</td><td>unit tests; E9</td></tr>
@@ -197,7 +160,7 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 <p><b>Intrusion tolerance.</b> The design assumes some attacks will get through a layer and limits the damage: a stolen token works only for 15 minutes and only within one student's rights; an attack burst is denied, counted and alerted (<code>AuthFailureSpike</code>); the database role cannot destroy data; a flood is cut by rate limits before it reaches the services; nginx failover cannot double-charge because of the client key.</p>
 <p><b>Final review fixes</b> (after the campaign): an idempotency key could be reused across students (now 409); a <code>{param}</code> route could reach a service's own <code>/openapi.json</code>; the stale cache kept 404s without a size bound; the app role could update user roles. Each fix has tests and was re-checked with one endterm run each of E5, E7 and E9.</p>
 
-<h2><span class="n">6</span>Verification and validation plan</h2>
+<h2>6. Verification and validation plan</h2>
 <div class="two">
 <div>
 <table>
@@ -211,25 +174,25 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 </div>
 <div>
 <p><b>Acceptance criteria</b> are machine-checked predicates over each run's measurements (for example "request availability ≥ 99.9 %", "no duplicate charge", "DatabaseDown fires within 10 s"). A scenario passes only if every criterion passes in every repetition.</p>
-<p><b>CI</b> (GitHub Actions): <code>unit</code>, <code>harness</code>, <code>config</code> (compose for 3 modes, promtool, <code>nginx -t</code>), <code>deps</code> (pip-audit), <code>integration</code> (full stack in Docker). All five jobs pass on <code>main</code> (run 42787494892 in <code>a169n/fault_tolerance_endterm</code>).</p>
+<p><b>CI</b> (GitHub Actions): <code>unit</code>, <code>harness</code>, <code>config</code> (compose for 3 modes, promtool, <code>nginx -t</code>), <code>deps</code> (pip-audit), <code>integration</code> (full stack in Docker). All five jobs pass on <code>main</code> (GitHub Actions run 43413394352).</p>
 </div>
 </div>
 
-<h2><span class="n">7</span>Fault-injection and security-test methodology</h2>
+<h2>7. Fault-injection and security-test methodology</h2>
 <p>Each run lasts 70 s under a closed-loop workload of 10 clients (60 % student reads, 20 % transcripts, 20 % payments; 20 % of payments are re-sent with the same key). The fault is injected at +20 s and repaired at +45 s. Before every run the harness restores a known state: all containers healthy and replicating, chaos settings reset, payments truncated, balances zeroed, and no alert firing. Each run records every request (with its request ID), all service events, alerts (polled every 1 s), CPU and memory, and the payments table for key-level integrity checks.</p>
 <table>
 <tr><th>Code</th><th>Scenario</th><th>Injection</th></tr>
 {{SCEN_TABLE}}
 </table>
-<p class="small muted">E1–E7 and E8 are fault or monitoring experiments (8 ≥ 4 required); E9 and E10 are security experiments (2 ≥ 2 required). 3 modes × 3 repetitions each = 90 runs, executed in mode order from a fresh database volume per mode. Hypothesis, steps, expected result and limitations of each experiment: <code>TEST-PLAN.md</code> (E1–E10); observed results per experiment: full report §8.5.</p>
+<p class="small">E1–E7 and E8 are fault or monitoring experiments (8 ≥ 4 required); E9 and E10 are security experiments (2 ≥ 2 required). 3 modes × 3 repetitions each = 90 runs, executed in mode order from a fresh database volume per mode. Hypothesis, steps, expected result and limitations of each experiment: <code>TEST-PLAN.md</code> (E1–E10); observed results per experiment: full report §8.5.</p>
 
-<h2 class="pb"><span class="n">8</span>Results: baseline vs midterm vs endterm</h2>
+<h2 class="pb">8. Results: baseline vs midterm vs endterm</h2>
 <table>
 <tr><th>Code</th><th>Scenario</th><th>Type</th><th>baseline</th><th>midterm</th><th>endterm</th></tr>
 {{MATRIX}}
 <tr><td></td><td><b>Scenarios passed</b></td><td></td><td><b>{{P_BASE}} / 10</b></td><td><b>{{P_MID}} / 10</b></td><td><b>{{P_END}} / 10</b></td></tr>
 </table>
-<p class="small muted">"k/3" = repetitions in which every criterion passed. E6 and E8 pass in the baseline because their criteria do not discriminate: at 110 clients nothing failed because of load and "not rate-limited" is trivially true without a limiter (E6), and the alerting that E8 tests is on in every mode (see §9).</p>
+<p class="small">"k/3" = repetitions in which every criterion passed. E6 and E8 pass in the baseline because their criteria do not discriminate: at 110 clients nothing failed because of load and "not rate-limited" is trivially true without a limiter (E6), and the alerting that E8 tests is on in every mode (see §9).</p>
 
 <figure>
 {{CHART_AVAIL}}
@@ -258,18 +221,18 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 </table>
 <p class="small"><b>Data integrity.</b> Midterm and endterm, checked key by key, lost no acknowledged payment and had {{MIDEND_DUP}} duplicate charges and no orphaned payments. The baseline does not store the client key, so it could only be checked by count (no shortfall found); the baseline, which ignores the idempotency key, charged {{DUP_BASE}} client re-sends twice and left orphaned <code>pending</code> payments in E5 and E10.</p>
 
-<div class="callout warn"><b>Where the endterm is worse or the evidence is weak.</b>
-<ul class="small" style="margin:2px 0 0">
+<h3>Where the endterm is worse or the evidence is weak</h3>
+<ul class="small">
 <li><b>Cost:</b> at the 110-client peak (E6) endterm p95 was {{E6_P95_END}} ms against {{E6_P95_BASE}} / {{E6_P95_MID}} ms, while serving more requests ({{E6_RPS_END}} req/s against {{E6_RPS_BASE}} / {{E6_RPS_MID}}): the endterm's extra per-request gateway work (token, policy, limiter) shows up as a longer tail, but the second gateway changed at the same time, so the cost cannot be attributed to security alone. Still under the 1 s target.</li>
 <li><b>E2 availability:</b> the baseline scores higher ({{E2_A_BASE}} against {{E2_A_END}}) only because its clients hang and stop sending; it served {{E2_RPS_BASE}} req/s during the fault against {{E2_RPS_END}} for the endterm.</li>
 <li><b>DR7 not met:</b> in E2 <code>HighLatencyP95</code> fired in all 3 endterm runs although not expected. It is a true symptom: a replica first waits 1 s for the dead primary before reading from the standby, longer than the gateway's 800 ms attempt timeout. Endterm meets 9 of 10 requirements.</li>
-</ul></div>
+</ul>
 
 <h3>One incident end to end (E2, endterm run r1)</h3>
 <img class="fig" src="{{FIG_DB}}" alt="Grafana dashboard during the database failure">
-<p class="small muted" style="margin-top:3px">First failed call 0.26 s after the primary stopped; ejection and breaker at 0.33 s; health probe at 0.46 s; <code>DatabaseDown</code> pending at 3.6 s and firing at 8.0 s. Reads continued from the standby or the stale cache; writes failed fast with 503 and recovered 5.6 s after the repair (5.2–10.1 s across the three runs). Full walkthrough with log lines: <code>OBSERVABILITY.md</code>.</p>
+<p class="small">First failed call 0.26 s after the primary stopped; ejection and breaker at 0.33 s; health probe at 0.46 s; <code>DatabaseDown</code> pending at 3.6 s and firing at 8.0 s. Reads continued from the standby or the stale cache; writes failed fast with 503 and recovered 5.6 s after the repair (5.2–10.1 s across the three runs). Full walkthrough with log lines: <code>OBSERVABILITY.md</code>.</p>
 
-<h2><span class="n">9</span>Discussion, limitations and lessons learned</h2>
+<h2>9. Discussion, limitations and lessons learned</h2>
 <p><b>Discussion.</b> The endterm's measurable gains over the midterm are exactly where its new mechanisms act: killing a gateway no longer causes an outage, a slow replica no longer costs most of the throughput, and attacks turn from silent successes into denied, audited and alerted events. Everything the midterm already masked (crashes, node loss, interrupted payments) stays masked. The baseline shows why: without idempotency every client re-send became a second charge.</p>
 <div class="two">
 <div><h3>Limitations</h3>
@@ -296,11 +259,11 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 </div>
 </div>
 
-<h2><span class="n">10</span>Conclusion and references</h2>
+<h2>10. Conclusion and references</h2>
 <p>In 90 controlled runs the endterm passed all 10 scenarios in every repetition, against 6 for the midterm configuration and 2 for the baseline. It meets 9 of its 10 requirements (DR7 missed by one unexpected but genuine alert). Across the 60 midterm and endterm runs no payment was lost, duplicated or left pending. The weak points are reported with the data that shows them rather than tuned away.</p>
-<p class="small muted">References: endterm and midterm assignments (<code>docs/requirements/</code>); Avižienis et al., "Basic Concepts and Taxonomy of Dependable and Secure Computing", IEEE TDSC 2004; Shostack, <i>Threat Modeling</i> (STRIDE), 2014; Nygard, <i>Release It!</i>, 2018; Beyer et al., <i>Site Reliability Engineering</i>, 2016; Schroeder et al., "Open Versus Closed: A Cautionary Tale", NSDI 2006; RFC 7519 / RFC 8725 (JWT); OWASP API Security Top 10 (2023); Prometheus, nginx, Envoy, PostgreSQL 16 and Kubernetes documentation.</p>
+<p class="small">References: endterm and midterm assignments (<code>docs/requirements/</code>); Avižienis et al., "Basic Concepts and Taxonomy of Dependable and Secure Computing", IEEE TDSC 2004; Shostack, <i>Threat Modeling</i> (STRIDE), 2014; Nygard, <i>Release It!</i>, 2018; Beyer et al., <i>Site Reliability Engineering</i>, 2016; Schroeder et al., "Open Versus Closed: A Cautionary Tale", NSDI 2006; RFC 7519 / RFC 8725 (JWT); OWASP API Security Top 10 (2023); Prometheus, nginx, Envoy, PostgreSQL 16 and Kubernetes documentation.</p>
 
-<h2><span class="n">11</span>Appendix</h2>
+<h2>11. Appendix</h2>
 <table>
 <tr><th>What</th><th>Where</th></tr>
 <tr><td>Full technical report (all tables, per-experiment hypotheses and observations)</td><td><code>reports/endterm/REPORT.md</code></td></tr>
@@ -310,23 +273,8 @@ img.fig { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
 <tr><td>Code: mechanisms, security, services</td><td><code>app/fault_tolerance/</code>, <code>app/security/</code>, <code>app/services/</code></td></tr>
 <tr><td>Tests and fault injection</td><td><code>tests/unit</code>, <code>tests/integration</code>, <code>experiments/</code> (<code>npm run exp &lt;scenario&gt;</code>, <code>npm run campaign -- --reps 3</code>, <code>npm run demo</code>)</td></tr>
 </table>
-<h3>Individual contributions</h3>
-<p class="small">The commits after <code>midterm-final</code> were made by an AI coding assistant working on the team's behalf (full report §11.6). Each team member describes their own part below.</p>
-<div class="fill small">Aibyn Talgatov: …</div>
-<div class="fill small" style="margin-top:6px">Gani Uapov: …</div>
-
-<h2 class="pb"><span class="n">★</span>Defense cheat sheet: likely questions</h2>
-<div class="qa"><p class="q">Why three modes instead of comparing against the old midterm commit?</p><p class="a">Same image, same host, same harness: the only variable is the switch, so a difference in the numbers is caused by the mechanisms. The old midterm campaign is quoted for reference only.</p></div>
-<div class="qa"><p class="q">Why doesn't a failed gateway cause double charges when nginx re-sends the POST?</p><p class="a">Every payment must carry a client-generated <code>Idempotency-Key</code>; a request without one gets 400. The database has a unique constraint on the key, so the re-sent request returns the stored payment instead of charging again. Across all 30 endterm runs: {{DUP_END}} duplicate charges.</p></div>
-<div class="qa"><p class="q">What is the difference between the circuit breaker and outlier ejection?</p><p class="a">The breaker is per pool: it stops calling a whole service that keeps failing. Ejection is per instance: it removes one bad replica after 3 consecutive failures for 10 s. A per-pool breaker cannot isolate one slow replica, because every successful retry on the healthy replica resets it (found in the midterm); ejection raised goodput from {{E3_MID}} to {{E3_END}} of normal.</p></div>
-<div class="qa"><p class="q">Why does the baseline have higher availability than the endterm in E2?</p><p class="a">Closed-loop clients: baseline requests hang without timeouts, so clients send almost nothing and record few failures ({{E2_RPS_BASE}} req/s served). The endterm fails writes fast and keeps serving reads ({{E2_RPS_END}} req/s). Time-based availability and goodput show the real picture.</p></div>
-<div class="qa"><p class="q">How is an incident detected and diagnosed?</p><p class="a">Detection: the first failed call is seen in under 1 s; the alert fires after the 2 s scrape and evaluation, its <code>for</code> period and, for rate rules, the window fill (6.0–10.3 s measured in the endterm). Diagnosis: the Grafana panels show which instance and which status; the request ID of a failed request finds every log line on every hop.</p></div>
-<div class="qa"><p class="q">What happens if someone steals a student's token?</p><p class="a">It expires within 15 minutes and only allows that student's own reads and payments. There is no revocation list; this is accepted risk R3.</p></div>
-<div class="qa"><p class="q">Why can't <code>alg:none</code> or a forged token pass?</p><p class="a">The verifier accepts only HS256 with the server's secret and checks issuer, audience and expiry; anything else raises an error and the gateway fails closed with 401. E9 tested all four token attacks: 36 × 401.</p></div>
-<div class="qa"><p class="q">Does security slow the system down?</p><p class="a">At normal load no overhead is visible. At the 110-client peak the p95 grew from about {{E6_P95_MID}} to {{E6_P95_END}} ms while throughput rose. Probably the per-request token, policy and limiter work, but the second gateway changed at the same time, so we cannot attribute it to security alone. It stays below the 1 s target.</p></div>
-<div class="qa"><p class="q">Which requirement is not met, and why not fix the criterion?</p><p class="a">DR7: <code>HighLatencyP95</code> fired unexpectedly in E2. It is a real defect (the 1 s DB wait is longer than the 800 ms gateway timeout). Changing the acceptance rule after seeing the result would make the test meaningless, so it is reported as a miss and listed as the first next step.</p></div>
-<div class="qa"><p class="q">How do you know the numbers are not made up?</p><p class="a">Every table is generated by <code>experiments/aggregate.ts</code> from the 90 committed <code>metrics.json</code> files; the security counts and the incident timeline come from per-run <code>metrics.json</code> and the committed raw request and event logs. Re-running <code>npm run campaign -- --reps 3</code> gives new measurements of the same kind, not identical numbers.</p></div>
-<div class="qa"><p class="q">What would you do with more time?</p><p class="a">Fix the timeout nesting, re-run the campaign on the upgraded dependencies, use an open-loop load generator, share rate-limit state between gateways, and remove the remaining single points of failure (second nginx, automatic DB failover).</p></div>
+<h3>Contribution</h3>
+<p class="small">Aibyn Talgatov defined the endterm scope from the assignment, reviewed and approved the implementation plan (including the three-mode comparison and the ten experiments), directed its execution task by task, managed the repository, CI and the move to <code>a169n/fault_tolerance_endterm</code>, and set the scope and format of this report. The implementation was produced with an AI coding assistant (Claude Code); every change was checked by automated tests and independent review before it was merged. The system extends the team's midterm project.</p>
 
 </body>
 </html>

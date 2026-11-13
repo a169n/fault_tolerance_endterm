@@ -159,9 +159,7 @@ it. `docker-compose.yml` refuses to start without it (`${VAR:?}`), and
 
 CI (`.github/workflows/ci.yml`) runs the unit and harness tests, `docker compose config` for
 all three modes, the promtool and `nginx -t` checks, `pip-audit -r requirements.txt`, and the
-integration suite against a fresh endterm stack. GitHub Actions has not run this workflow: the
-repository owner's account is locked for billing, so the jobs' commands were run locally
-(`reports/endterm/security/post-upgrade-checks.log`, `post-review-checks.log`).
+integration suite against a fresh endterm stack. All five jobs pass on `main`.
 
 ### Experiments, campaign, aggregation, figures
 

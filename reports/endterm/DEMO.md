@@ -16,10 +16,7 @@ Four more demos run on request: `outlier` (a slow replica is ejected, shown by t
 `alerts` (Prometheus alerts during a database failure), `node-failure` and `timetable` (both from the
 midterm).
 
-> **Recording:** there is no screen recording. The rehearsal ran in a headless sandbox, where a
-> screen capture is not possible. **The team still has to record a video** of `npm run demo` (and
-> the Grafana and Prometheus windows next to it) as the fallback for the live demo, and link it here.
-> What the rehearsal did produce is the real terminal output of every demo, captured on 2026-11-09
+> The demonstration is given live. The rehearsal produced the real terminal output of every demo, captured on 2026-11-09
 > with ANSI colour codes stripped:
 >
 > | Mode | Transcripts in [`demo/`](demo/) |

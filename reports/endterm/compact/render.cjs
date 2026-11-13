@@ -6,6 +6,6 @@ const { chromium } = require('playwright');
   await p.goto('file://' + require('path').resolve(src), { waitUntil: 'load' });
   await p.pdf({ path: out, format: 'A4', printBackground: true, preferCSSPageSize: true,
     displayHeaderFooter: true, headerTemplate: '<span></span>',
-    footerTemplate: '<div style="font:8px Inter,sans-serif;color:#5a6577;width:100%;padding:0 15mm;display:flex;justify-content:space-between"><span>Resilient University Information System · Endterm (compact)</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>' });
+    footerTemplate: '<div style="font:8px Inter,sans-serif;color:#000;width:100%;padding:0 15mm;display:flex;justify-content:space-between"><span>Resilient University Information System · Endterm report · Aibyn Talgatov</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>' });
   await b.close();
 })();
